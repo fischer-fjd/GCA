@@ -1,0 +1,53 @@
+## Processing pipeline for Airborne Laser Scanning (ALS) v..1.0.0
+
+   Developed as part of the Global Canopy Atlas (GCA) project.
+   Derives elevation and canopy height rasters that are maximally robust
+   to differences in instrumentation and pulse density between scans.
+
+   Executed from R. Dependent on LAStools (https://rapidlasso.de/).
+   License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+   Operating System: Windows(64bit)
+   LAStools version: 241001
+
+## DEVELOPERS:
+
+   Fabian Jörg Fischer and Tommaso Jucker
+
+## ADDITIONAL CONTRIBUTORS TO DEVELOPMENT:
+
+   Toby Jackson, Greg Vincent, Becky Morgan, Nicolas Labriere
+   Andres Gonzalez-Moreno, Jerome Chave, Maxime Rejou-Mechain
+
+## CITATION:
+
+   Fischer, F. J., Jackson, T., Vincent, G., & Jucker, T. 2024.
+   Robust characterisation of forest structure from airborne laser
+   scanning — A systematic assessment and sample workflow for ecologists.
+   Methods in Ecology and Evolution. https://doi.org/10.1111/2041-210X.14416
+
+   Github: https://github.com/fischer-fjd/GCA
+   Zenodo: 10.5281/zenodo.13883963
+
+## PRODUCTS:
+
+   Digital surface models (DSMs)
+   Digital terrain models (DTMs)
+   Canopy height models (CHMs)
+   Pulse density rasters
+   Scan angle rasters
+   Data quality masks
+   Outline shapefiles with processing summaries
+
+## CHANGES:
+
+   v.1.0.0: First release version, surpasses development versions (v1-50)
+            Linux + Windows support
+            Refinement of ground classification/DTMs in steep areas
+            Additional masks to subset to high-quality areas
+            Thinning at 10 cm resolution for dsm_lspikefree computation
+            Improved documentation, input checks and file naming
+
+## FURTHER INFO:
+
+   Individual products: _INFO_products.csv
+   Processing summaries: summary_processing.csv + _INFO_summary_processing.csv

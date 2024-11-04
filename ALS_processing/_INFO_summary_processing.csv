@@ -1,1 +1,74 @@
-
+column,description
+dataset,Informal dataset descriptor
+site,Acquisition site. Empty if several sites are provided or no site name is known
+source,Data contributors. GCA01 if data have been downloaded from open repository
+citation,Reference of relevant article or a link to the data source
+contact,Email address of contributor(s). Empty if data are openly accessible
+access,Details on data accessibility (open vs. closed)
+license,"If applicable, license type (eg., CC-BY 4.0)"
+updated,Date when metadata were last updated. In dd/mm/YYYY format
+id_orig,"If applicable, original identifier in source database"
+acq_type,"Type of scan (ALS, DLS)"
+acq_crs,"Coordinate reference system of raw data. Usually supplied as EPSG code (e.g., EPSG:32650)"
+acq_units,"Units in which raw data have been supplied (m, ft). Can be both m and ft if horizontal and vertical units differ."
+acq_mindt,"First date of acquisition as found in flight information. If not known exactly, first day of month when acquisition was started. In dd/mm/YYYY format"
+acq_maxdt,"Last date of acquisition as found in flight information. If not known exactly, last day of month when acquisition was started. In dd/mm/YYYY format"
+acq_system,Laser scanning instrument
+acq_AGL,Flight altitude above ground in m
+acq_swath,Field of view or entire swath of scan in degrees. May not always be reliable due to different reporting conventions
+acq_wavel,Wavelength in nm
+acq_fpsize,Footprint diameter in cm
+acq_lasdiv,Laser divergence in mrad
+notes,Any additional information
+issues,"Problems noted either in processing or beforehand (cloud, noise, etc.)"
+height_lim,Processing instruction. Height limit in m above ground above which points are automatically removed. Defaults to 125 m
+angle_lim,Processing instruction. Scan angle in degrees above which points are automatically removed. Defaults to NA (no removal)
+class_rm,Processing instruction. Points with these classifications are automatically removed during processing. Defaults to NA (no removal)
+exclass_rm,Processing instruction. Points with these extended classifications are automatically removed during processing. Defaults to NA (no removal)
+prms_lspkf,Parameters used to create the locally adaptive spikefree DSM and CHM (dsm_lspikefree.tif and chm_lspikefree.tif)
+crs,"Coordinate reference system in which products are delivered. Usually same as acq_crs, but overwritten by conflicting information in LAS files and, if necessary, re-projected to metric systems"
+lon,Longitude of centroid
+lat,Latitude of centroid
+area_km2,Total area of acquisition in km2
+GPSadjstd,Flags if GPS timestamps are in adjusted standard time. This is a best guess based on flags in LAS header and actual extents of timestamps
+mingps,Minimum GPS timestamp across LAS files
+maxgps,Maximum GPS timestamp across LAS files
+mindt,"Consensus estimate of first date of acquisition. Relies on GPS timestamps from LAS files if in adjusted standard time (dropping any timestamps that are set to 0 or large than current date), otherwise set to acq_mindt"
+maxdt,"Consensus estimate of last date of acquisition. Relies on GPS timestamps from LAS files if in adjusted standard time (dropping any timestamps that are set to 0 or large than current date), otherwise set to acq_maxdt"
+pd_point,Mean point density (m-2)
+pd_pulse,Mean pulse density (m-2)
+sdpd_pulse,Standard deviation of pulse density (m-2)
+frac_grnd,Fraction of ground points (unitless)
+angle99th,Maximum scan angle of acquisition (99th percentile)
+perc_pd02,Percentage of area with pulse density < 2 m-2
+perc_pd04,Percentage of area with pulse density < 4 m-2
+perc_steep,Percentage of area with steep areas
+perc_nogrd,Percentage of area without ground points
+perc_undtm,Percentage of area with potentially unstable DTMs
+perc_cloud,Percentage of area with potential cloud cover
+elev,Mean elevation (m)
+elev_min,Minimum elevation (m)
+elev_max,Maximum elevation (m)
+chm_mean,Mean canopy height based on chm_highest.tif (m)
+chm_sd,Standard deviation of canopy height based on chm_highest.tif (m)
+chm_perc99,The 99th percentile of canopy height based on chm_highest.tif (m)
+chm_max,Maximum canopy height based on chm_highest.tif (m)
+cc2,"Canopy cover at 2 m (fraction, unitless)"
+cc10,"Canopy cover at 10 m (fraction, unitless)"
+type_os,"Type of operating system (Windows, Linux, Darwin/macOS)"
+type_arch,Type of architecture (64 or 32)
+v_lastools,LAStools version
+dir_input,"Directory of raw data during processing. May correspond to actual location of data, but cannot generally be used as reference to raw data as folders may have been moved or processed elsewhere"
+dir_output,"Directory of processed data during processing. May correspond to actual location of products, but cannot generally be used as reference to products as folders may have been moved or processed elsewhere"
+time_start,Start time of processing
+time_end,End time of processing
+mins_total,Minutes spent on processing of this geo-unit
+mins_grdcl,Minutes spent on initial ground classification
+mins_grdrf,Minutes spent on refinement of ground classification
+mins_lspkf,Minutes spent on creation of chm_lspikefree.tif
+type_file,File type that was processed (.las or .laz)
+n_files,Number of raw data files
+n_cores,Number of cores used for processing
+adjacents,Flags if adjacent folders been scanned for overlapping point clouds. This is used for tile-based processing workflows where buffers from adjacent tiles can be added without requiring to process all tiles togethers
+size_MBin,Total size of input dataset
+size_MBout,Total size of output layers

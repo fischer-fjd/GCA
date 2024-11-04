@@ -1,11 +1,11 @@
-## Processing pipeline for Airborne Laser Scanning (ALS) v..1.0.0
+## Processing pipeline for Airborne Laser Scanning (ALS) v.1.0.1
 
    Developed as part of the Global Canopy Atlas (GCA) project.
    Derives elevation and canopy height rasters that are maximally robust
    to differences in instrumentation and pulse density between scans.
 
    Executed from R. Dependent on LAStools (https://rapidlasso.de/).
-   License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+   License: GPLv3 (http://www.gnu.org/licenses/gpl.html)
    Operating System: Windows(64bit)
    LAStools version: 241001
 
@@ -40,6 +40,9 @@
 
 ## CHANGES:
 
+   v.1.0.1: Option to remove RGB information via force.type_point = 1
+            Changed license to GPLv3 (recommended for code over CC BY 4.0)
+            Fixed BUG in refine.ground: focal error for tile size < 25 m
    v.1.0.0: First release version, surpasses development versions (v1-50)
             Linux + Windows support
             Refinement of ground classification/DTMs in steep areas

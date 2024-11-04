@@ -35,7 +35,7 @@ make.info = function(path_output = "", name_file = "_INFO_.txt", params_general)
   if(path_output != ""){
     # get current version of the script
     path_script_split = tstrsplit(basename(rstudioapi::getSourceEditorContext()$path), "_")
-    version_pipeline = gsub("v","",gsub(".R","", path_script_split[length(path_script_split)][[1]], fixed = T))
+    version_pipeline = gsub("v","", gsub("v.","",gsub(".R","", path_script_split[length(path_script_split)][[1]], fixed = T), fixed = T))
     
     # make output file
     file_output = file.path(path_output, name_file)
@@ -85,7 +85,8 @@ make.info = function(path_output = "", name_file = "_INFO_.txt", params_general)
       "## CHANGES:",
       "",
       "   v.1.0.1: Option to remove RGB information via force.type_point = 1",
-      "            Changed license to GPLv3 (recommended for code over CC BY 4.0",
+      "            Changed license to GPLv3 (recommended for code over CC BY 4.0)",
+      "            Fixed BUG in refine.ground: focal error for tile size < 25 m",
       "   v.1.0.0: First release version, surpasses development versions (v1-50)",
       "            Linux + Windows support",
       "            Refinement of ground classification/DTMs in steep areas",
@@ -2242,9 +2243,12 @@ refine.ground_tile = function(tile_pointcloud, params_general, path_output, nbin
     )
   )
   
+  # create a vector of file.paths (additional ground files will be added on top if necessary)
+  tiles_ground_system = file.path.system(type_os = params_general$type_os, tile_ground) 
+  
+  # now aggregate dtm to assess slope
   dtm = rast(file.path(dir_tile, paste0(name_tile,"_dtm.tif")))
   dtm_highest = rast(file.path(dir_tile, paste0(name_tile,"_dtm_highest.tif")))
-  
   dtm_highest = extend(crop(dtm_highest, dtm), dtm)
   
   dtm_agg = aggregate(dtm, fact = 5, fun = "mean", na.rm = T)
@@ -2252,192 +2256,198 @@ refine.ground_tile = function(tile_pointcloud, params_general, path_output, nbin
   
   mat_circular = focalMat(dtm_agg, radius_dtm, type = "circle") # draw a 25m circle around each point
   mat_circular[mat_circular != 0] = 1
-  dtm_agg = terra::focal(dtm_agg, w = mat_circular, fun = "mean", na.rm = T)
-  slope_dtm = terra::terrain(dtm_agg, v = "slope", unit = "degrees", neighbors = 8)
   
-  dtm_highest_agg = focal(dtm_highest_agg, w = mat_circular, fun = "mean", na.rm = T)
-  slope_dtm_highest = terra::terrain(dtm_highest_agg, v = "slope", unit = "degrees", neighbors = 8)
+  # there are sometimes tiny tiles at the edges that can be smaller than the smoothing matrix
+  # these are irrelevant for ground refinement, but can cause problems for the focal operation, so we allow for an exception in those cases
+  dim_dtm_agg = min(nrow(dtm_agg),ncol(dtm_agg))
+  dim_mat_circular = min(nrow(mat_circular),ncol(mat_circular))
   
-  # define point around which to turn
-  zmax = round(as.numeric(global(dtm, "max",na.rm = T)))
-  zmin = round(as.numeric(global(dtm, "min",na.rm = T)))
-  
-  origin_xy = c(
-    0.5 * (xmin(slope_dtm) + xmax(slope_dtm))
-    , 0.5 * (ymin(slope_dtm) + ymax(slope_dtm))
-  )
-  origin_xz = c(
-    0.5 * (xmin(slope_dtm) + xmax(slope_dtm))
-    , 0.5 * (zmin + zmax)
-  )
-
-  # Common settings
-  # Default: step is 25 m, sub is 5, bulge is 2 m, spike is 1+1 m, and offset is 0.05 m
-  # Nature: step is 5 m, sub is 3, bulge is 1 m, spike is 1+1 m, and offset is 0.05 m
-  # extra_fine changes sub to 7, bulge should be 1/10th of step size, but is clamped to between 1 and 2 by default
-  # Here we use highest resolution for the initial reclassification and slightly lower resolution when rotating the point cloud
-  
-  steps_refinement = data.table(
-    minangle_steep = c(40, 60)
-    , maxangle_xz = c(20, 30)
-    , nbincrements_xz = c(1, 1)
-    , minradius_NA = c(15, NA)
-    , option_initial = c("-bulge 3.0 -hyper_fine","-nature -extra_fine")
-    , option_rotated = c("-bulge 3.0 -extra_fine","-nature")
-  )
-  
-  # define intermediate files
-  tile_pointcloud_refined = file.path(dir_tile, paste0(name_tile,"_refined.laz"))
-  tile_pointcloud_rotated = file.path(dir_tile, paste0(name_tile,"_rotated.laz"))
-  tile_pointcloud_tilted = file.path(dir_tile, paste0(name_tile,"_tilted.laz"))
-  tile_pointcloud_tiltedback = file.path(dir_tile, paste0(name_tile,"_tiltedback.laz"))
-  
-  # create a vector of file.paths
-  tiles_ground_system = file.path.system(type_os = params_general$type_os, tile_ground) 
-  
-  for(i in 1:nrow(steps_refinement)){
-    # get analysis parameters
-    minangle_steep = steps_refinement[i]$minangle_steep
-    maxangle_xz = steps_refinement[i]$maxangle_xz
-    nbincrements_xz = steps_refinement[i]$nbincrements_xz
-    minradius_NA = steps_refinement[i]$minradius_NA
-    option_initial = steps_refinement[i]$option_initial
-    option_rotated = steps_refinement[i]$option_rotated
+  # new in v.1.0.1: this is the minimum condition so that terra does not throw an error, but it is also quite extreme (for this exception to be not fulfilled, the raster needs to be less than 25m in one direction, assuming a 25m smoothing operator)
+  if(dim_mat_circular < 2 * dim_dtm_agg){
+    dtm_agg = terra::focal(dtm_agg, w = mat_circular, fun = "mean", na.rm = T)
+    slope_dtm = terra::terrain(dtm_agg, v = "slope", unit = "degrees", neighbors = 8)
     
-    # get steep areas
-    areas_steep = ifel(slope_dtm >= minangle_steep | slope_dtm_highest >= minangle_steep, 1, NA)
+    dtm_highest_agg = focal(dtm_highest_agg, w = mat_circular, fun = "mean", na.rm = T)
+    slope_dtm_highest = terra::terrain(dtm_highest_agg, v = "slope", unit = "degrees", neighbors = 8)
     
-    # add NA areas
-    if(!is.na(minradius_NA)){
-      # get nona
-      dtm_nona_agg = aggregate(ifel(is.na(dtm_highest),NA,1), fact = 5, fun = "mean", na.rm = T)
-      mat_circular = focalMat(dtm_nona_agg, minradius_NA, type = "circle") # draw a circle around each point
-      mat_circular[mat_circular != 0] = 1
-      dtm_nona_agg = focal(dtm_nona_agg, w = mat_circular, fun = "mean", na.rm = T)
-      dtm_na_agg = focal(ifel(is.na(dtm_nona_agg),1,NA), w = mat_circular, fun = "mean", na.rm = T)
+    # define point around which to turn
+    zmax = round(as.numeric(global(dtm, "max",na.rm = T)))
+    zmin = round(as.numeric(global(dtm, "min",na.rm = T)))
     
-      # combine with other steep areas
-      areas_steep = ifel(areas_steep == 1 | dtm_na_agg == 1, 1, NA) 
-    }
+    origin_xy = c(
+      0.5 * (xmin(slope_dtm) + xmax(slope_dtm))
+      , 0.5 * (ymin(slope_dtm) + ymax(slope_dtm))
+    )
+    origin_xz = c(
+      0.5 * (xmin(slope_dtm) + xmax(slope_dtm))
+      , 0.5 * (zmin + zmax)
+    )
+  
+    # Common settings
+    # Default: step is 25 m, sub is 5, bulge is 2 m, spike is 1+1 m, and offset is 0.05 m
+    # Nature: step is 5 m, sub is 3, bulge is 1 m, spike is 1+1 m, and offset is 0.05 m
+    # extra_fine changes sub to 7, bulge should be 1/10th of step size, but is clamped to between 1 and 2 by default
+    # Here we use highest resolution for the initial reclassification and slightly lower resolution when rotating the point cloud
     
-    nona_areas_steep = as.numeric(global(areas_steep, fun="notNA"))
+    steps_refinement = data.table(
+      minangle_steep = c(40, 60)
+      , maxangle_xz = c(20, 30)
+      , nbincrements_xz = c(1, 1)
+      , minradius_NA = c(15, NA)
+      , option_initial = c("-bulge 3.0 -hyper_fine","-nature -extra_fine")
+      , option_rotated = c("-bulge 3.0 -extra_fine","-nature")
+    )
     
-    if(nona_areas_steep > 0){
-      # now we rotate the point cloud in 8 cardinal directions
-      # the easiest way to do this seems by rotating the entire tile 8 times (each time 45 degrees) and do a single-direction upwards/downwards flip
-      # alternatives would be to rotate 4 times and do two upwards/downwards flips, etc. But then an extra rotation back or forth by 180 degrees is needed
-      # technically, this segment could be taken outside of the loop, but we keep it here for now
-
+    # define intermediate files
+    tile_pointcloud_refined = file.path(dir_tile, paste0(name_tile,"_refined.laz"))
+    tile_pointcloud_rotated = file.path(dir_tile, paste0(name_tile,"_rotated.laz"))
+    tile_pointcloud_tilted = file.path(dir_tile, paste0(name_tile,"_tilted.laz"))
+    tile_pointcloud_tiltedback = file.path(dir_tile, paste0(name_tile,"_tiltedback.laz"))
+    
+    for(i in 1:nrow(steps_refinement)){
+      # get analysis parameters
+      minangle_steep = steps_refinement[i]$minangle_steep
+      maxangle_xz = steps_refinement[i]$maxangle_xz
+      nbincrements_xz = steps_refinement[i]$nbincrements_xz
+      minradius_NA = steps_refinement[i]$minradius_NA
+      option_initial = steps_refinement[i]$option_initial
+      option_rotated = steps_refinement[i]$option_rotated
       
-      # we copy the file into the current directory
-      if(option_initial != ""){
-        # new in v.50: previously we did not reclassify in the untilted mode, although this should be the most reliable classification
-        # classify the tilted point cloud
-        return_system = system(
-          paste(
-            file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("lasground_new", type_architecture = params_general$type_architecture)),
-            "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud),
-            "-cores 1",
-            "-non_ground_unchanged", # crucial: keeps previous classifications (trivially true for ground classifications)
-            # "-ground_class 2", # not necessary
-            option_initial,
-            "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
-            ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
-          )
-        )
-      } else {
-        # otherwise just copy it
-        file.copy(from = tile_pointcloud,to = tile_pointcloud_rotated, overwrite = T)
+      # get steep areas
+      areas_steep = ifel(slope_dtm >= minangle_steep | slope_dtm_highest >= minangle_steep, 1, NA)
+      
+      # add NA areas
+      if(!is.na(minradius_NA)){
+        # get nona
+        dtm_nona_agg = aggregate(ifel(is.na(dtm_highest),NA,1), fact = 5, fun = "mean", na.rm = T)
+        mat_circular = focalMat(dtm_nona_agg, minradius_NA, type = "circle") # draw a circle around each point
+        mat_circular[mat_circular != 0] = 1
+        dtm_nona_agg = focal(dtm_nona_agg, w = mat_circular, fun = "mean", na.rm = T)
+        dtm_na_agg = focal(ifel(is.na(dtm_nona_agg),1,NA), w = mat_circular, fun = "mean", na.rm = T)
+      
+        # combine with other steep areas
+        areas_steep = ifel(areas_steep == 1 | dtm_na_agg == 1, 1, NA) 
       }
       
-      if(maxangle_xz > 0 & nbincrements_xz >= 1 & nbincrements_xy>= 1){
-        angle_xy = 360/nbincrements_xy
-        angle_xz = maxangle_xz/nbincrements_xz
+      nona_areas_steep = as.numeric(global(areas_steep, fun="notNA"))
+      
+      if(nona_areas_steep > 0){
+        # now we rotate the point cloud in 8 cardinal directions
+        # the easiest way to do this seems by rotating the entire tile 8 times (each time 45 degrees) and do a single-direction upwards/downwards flip
+        # alternatives would be to rotate 4 times and do two upwards/downwards flips, etc. But then an extra rotation back or forth by 180 degrees is needed
+        # technically, this segment could be taken outside of the loop, but we keep it here for now
+  
         
-        for(increment_xy in 1:nbincrements_xy){
-          # first take the rotated point cloud and tilt it
-          cat("Angle:",(increment_xy-1) * angle_xy,"\n")
-          cat("Tilt the point cloud up to",maxangle_xz,"in",nbincrements_xz,"increments and reclassify\n")
-          for(increment_xz in 1:nbincrements_xz){
+        # we copy the file into the current directory
+        if(option_initial != ""){
+          # new in v.50: previously we did not reclassify in the untilted mode, although this should be the most reliable classification
+          # classify the tilted point cloud
+          return_system = system(
+            paste(
+              file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("lasground_new", type_architecture = params_general$type_architecture)),
+              "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud),
+              "-cores 1",
+              "-non_ground_unchanged", # crucial: keeps previous classifications (trivially true for ground classifications)
+              # "-ground_class 2", # not necessary
+              option_initial,
+              "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
+              ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
+            )
+          )
+        } else {
+          # otherwise just copy it
+          file.copy(from = tile_pointcloud,to = tile_pointcloud_rotated, overwrite = T)
+        }
+        
+        if(maxangle_xz > 0 & nbincrements_xz >= 1 & nbincrements_xy>= 1){
+          angle_xy = 360/nbincrements_xy
+          angle_xz = maxangle_xz/nbincrements_xz
+          
+          for(increment_xy in 1:nbincrements_xy){
+            # first take the rotated point cloud and tilt it
+            cat("Angle:",(increment_xy-1) * angle_xy,"\n")
+            cat("Tilt the point cloud up to",maxangle_xz,"in",nbincrements_xz,"increments and reclassify\n")
+            for(increment_xz in 1:nbincrements_xz){
+              return_system = system(
+                paste(
+                  file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("las2las", type_architecture = params_general$type_architecture)),
+                  "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
+                  "-cores 1",
+                  "-rotate_xz", paste0(angle_xz," ", origin_xz[1], " ", origin_xz[2]), 
+                  "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_tilted),
+                  ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
+                )
+              )
+              
+              # classify the tilted point cloud
+              return_system = system(
+                paste(
+                  file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("lasground_new", type_architecture = params_general$type_architecture)),
+                  "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_tilted),
+                  "-cores 1",
+                  "-non_ground_unchanged", # crucial: keeps previous classifications (trivially true for ground classifications)
+                  # "-ground_class 2", # not necessary
+                  option_rotated,
+                  "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
+                  ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
+                )
+              )
+            }
+            
+            # convert back to untilted
+            cat("Tilt the point cloud back by",-maxangle_xz, "\n")
             return_system = system(
               paste(
                 file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("las2las", type_architecture = params_general$type_architecture)),
                 "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
                 "-cores 1",
-                "-rotate_xz", paste0(angle_xz," ", origin_xz[1], " ", origin_xz[2]), 
-                "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_tilted),
+                "-rotate_xz", paste0(-maxangle_xz," ", origin_xz[1], " ", origin_xz[2]), 
+                "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_tiltedback),
                 ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
               )
             )
             
-            # classify the tilted point cloud
+            # finally we rotate in xy direction
             return_system = system(
               paste(
-                file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("lasground_new", type_architecture = params_general$type_architecture)),
-                "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_tilted),
+                file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("las2las", type_architecture = params_general$type_architecture)),
+                "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_tiltedback),
                 "-cores 1",
-                "-non_ground_unchanged", # crucial: keeps previous classifications (trivially true for ground classifications)
-                # "-ground_class 2", # not necessary
-                option_rotated,
+                "-rotate_xy", paste0(angle_xy," ", origin_xy[1], " ", origin_xy[2]), 
                 "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
                 ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
               )
             )
           }
-          
-          # convert back to untilted
-          cat("Tilt the point cloud back by",-maxangle_xz, "\n")
-          return_system = system(
-            paste(
-              file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("las2las", type_architecture = params_general$type_architecture)),
-              "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
-              "-cores 1",
-              "-rotate_xz", paste0(-maxangle_xz," ", origin_xz[1], " ", origin_xz[2]), 
-              "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_tiltedback),
-              ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
-            )
-          )
-          
-          # finally we rotate in xy direction
-          return_system = system(
-            paste(
-              file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("las2las", type_architecture = params_general$type_architecture)),
-              "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_tiltedback),
-              "-cores 1",
-              "-rotate_xy", paste0(angle_xy," ", origin_xy[1], " ", origin_xy[2]), 
-              "-o", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
-              ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
-            )
-          )
         }
-      }
-      
-      # convert to polygons
-      # we do not merge polygons, but split them by cell ids; this is IMPORTANT, as otherwise points within donut-like polygons might be extracted too
-      values(areas_steep)[!is.na(values(areas_steep))] = cells(areas_steep)
-      polys_steep = as.polygons(areas_steep, values = T)
-      writeVector(polys_steep, filename = file.path(dir_tile, paste0(name_tile,"_steep.shp")), overwrite = T)
-
-      # extract ground points
-      tile_groundextra = file.path(dir_tile, paste0(name_tile,"_",i,"_groundextra.laz")) # for writing out 
-      
-      # this will throw lots of warnings of duplicate points due to our usage of grid cells as polygons (points close to polygon edges will probably be included in both)
-      # but no issue: we run lasduplicate at the end anyways
-      return_system = system(
-        paste(
-          file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("lasclip", type_architecture = params_general$type_architecture)),
-          "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
-          "-cores 1",
-          "-poly", file.path.system(type_os = params_general$type_os, dir_tile, paste0(name_tile,"_steep.shp")),
-          "-keep_class 2",
-          "-o", file.path.system(type_os = params_general$type_os, tile_groundextra),
-          "-dont_remove_empty_files",
-          ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
+        
+        # convert to polygons
+        # we do not merge polygons, but split them by cell ids; this is IMPORTANT, as otherwise points within donut-like polygons might be extracted too
+        values(areas_steep)[!is.na(values(areas_steep))] = cells(areas_steep)
+        polys_steep = as.polygons(areas_steep, values = T)
+        writeVector(polys_steep, filename = file.path(dir_tile, paste0(name_tile,"_steep.shp")), overwrite = T)
+  
+        # extract ground points
+        tile_groundextra = file.path(dir_tile, paste0(name_tile,"_",i,"_groundextra.laz")) # for writing out 
+        
+        # this will throw lots of warnings of duplicate points due to our usage of grid cells as polygons (points close to polygon edges will probably be included in both)
+        # but no issue: we run lasduplicate at the end anyways
+        return_system = system(
+          paste(
+            file.path.system(type_os = params_general$type_os, params_general$path_lastools, update.command_lastools("lasclip", type_architecture = params_general$type_architecture)),
+            "-i", file.path.system(type_os = params_general$type_os, tile_pointcloud_rotated),
+            "-cores 1",
+            "-poly", file.path.system(type_os = params_general$type_os, dir_tile, paste0(name_tile,"_steep.shp")),
+            "-keep_class 2",
+            "-o", file.path.system(type_os = params_general$type_os, tile_groundextra),
+            "-dont_remove_empty_files",
+            ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
+          )
         )
-      )
-      
-      # put file paths together
-      tiles_ground_system = c(tiles_ground_system, file.path.system(type_os = params_general$type_os, tile_groundextra)) 
+        
+        # put file paths together
+        tiles_ground_system = c(tiles_ground_system, file.path.system(type_os = params_general$type_os, tile_groundextra)) 
+      }
     }
   }
   

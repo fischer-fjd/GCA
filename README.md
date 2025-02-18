@@ -4,7 +4,7 @@ Processing functions for Airborne Laser Scanning (ALS) and the Global Canopy Atl
 All code is released under a GPLv3 license (https://www.gnu.org/licenses/). All publicly available products are released under a CC BY 4.0 license (https://creativecommons.org/licenses/by/4.0/).
 
 ### SOFTWARE 
-The pipeline is dependent on LAStools (https://rapidlasso.de). For most use cases, this requires a license (cf. https://rapidlasso.de/pricing/). Always use the most recent version of the pipeline and download the most recent version of LAStools before processing.
+The pipeline is dependent on LAStools (https://rapidlasso.de). For most use cases, this requires a license (cf. https://rapidlasso.de/pricing/). Always use the most recent version of the pipeline and download a recent version of LAStools before processing. When systematic processing errors occur, it's useful to try both the most recent and a slightly older version of LAStools to rule out issues due to a recent update.
 
 ### REFERENCE
 Documentation can be found in INFO files (cf. ALS_processing folder) and in this publication: 

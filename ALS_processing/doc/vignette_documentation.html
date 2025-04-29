@@ -71,23 +71,20 @@ pipeline</h1>
 <div id="TOC" class="toc">
 <div class="toc-box">
 <ul>
-<li><a href="#accronyms" id="toc-accronyms"><span class="toc-section-number">1</span> Accronyms</a></li>
+<li><a href="#list-of-accronyms" id="toc-list-of-accronyms"><span class="toc-section-number">1</span> List of accronyms</a></li>
 <li><a href="#package-description" id="toc-package-description"><span class="toc-section-number">2</span> Package description</a></li>
 <li><a href="#general-workflow" id="toc-general-workflow"><span class="toc-section-number">3</span> General workflow</a></li>
 <li><a href="#input-data" id="toc-input-data"><span class="toc-section-number">4</span> Input data</a></li>
 <li><a href="#parameters" id="toc-parameters"><span class="toc-section-number">5</span> Parameters</a></li>
 <li><a href="#usage" id="toc-usage"><span class="toc-section-number">6</span> Usage</a></li>
 <li><a href="#output-products" id="toc-output-products"><span class="toc-section-number">7</span> Output products</a></li>
-<li><a href="#recent-developments" id="toc-recent-developments"><span class="toc-section-number">8</span> Recent developments</a></li>
-<li><a href="#current-challenges" id="toc-current-challenges"><span class="toc-section-number">9</span> Current challenges</a></li>
-<li><a href="#future-work" id="toc-future-work"><span class="toc-section-number">10</span> Future work</a></li>
 </ul>
 </div>
 </div>
 
 <section class="main-content">
-<div id="accronyms" class="section level1" number="1">
-<h1><span class="header-section-number">1</span> Accronyms</h1>
+<div id="list-of-accronyms" class="section level1" number="1">
+<h1><span class="header-section-number">1</span> List of accronyms</h1>
 <ul>
 <li><strong>GCA</strong>: Global Canopy Atlas</li>
 <li><strong>DTM</strong>: Digital Terrain Model</li>
@@ -121,6 +118,8 @@ Model (DTM) and Canopy Height Model (CHM) from Aerial LiDAR Scanning
 step, the orange items represent the processing steps of the pipeline
 and the green items represent the final output products of the
 pipeline.</p>
+<p>A detailed description of the pipelins workflow is given in the
+following section.</p>
 <ul>
 <li><strong>Description</strong></li>
 </ul>
@@ -244,95 +243,6 @@ reprocessed</td>
 <li>Pulse density raster</li>
 <li>Scan angle raster</li>
 </ul>
-</div>
-<div id="recent-developments" class="section level1" number="8">
-<h1><span class="header-section-number">8</span> Recent
-developments</h1>
-<ul>
-<li><p>Open source – General functions</p></li>
-<li><p>Open source – Ground classification</p></li>
-</ul>
-</div>
-<div id="current-challenges" class="section level1" number="9">
-<h1><span class="header-section-number">9</span> Current challenges</h1>
-<ul>
-<li>Finish the implementation of all open source functions</li>
-</ul>
-</div>
-<div id="future-work" class="section level1" number="10">
-<h1><span class="header-section-number">10</span> Future work</h1>
-<ol style="list-style-type: decimal">
-<li><p><strong>Complete integration of the new ground classification
-algorithm in the pipeline</strong></p>
-<p>The new ground classification algorithm is intended to become a more
-performant open source option compared to the existing algorithms in
-lidR/lasR.</p>
-<p>This new algorithm has been tested in a standalone approach, and
-validated with real data. The next step is to integrate it in the
-pipeline to have a fully open source pipeline with performances closer
-to the commercial software equivalents (lastools).</p>
-<p>To do this, two solutions are possible</p>
-<ul>
-<li><p>Direct call to the pre-compiled executable from R, as done with
-lastools functions</p></li>
-<li><p>Wrap the C++ code in R to be able to be used directly from the R
-pipeline</p></li>
-</ul></li>
-<li><p><strong>Re-factorization of the pipeline into subsets of modular
-functions</strong></p>
-<p>The current state of the pipeline has all the sub-functions coded in
-a common source file. This lead to a complicated readability and
-maintenance of the code base. A restructuring of this code into
-individual source files for each function will be done to better
-organize the repository and have a faster maintenance of the
-pipeline.</p></li>
-<li><p><strong>Integration and test of the pipeline in the MAAP
-platform</strong></p>
-<p>The Multi-Mission Algorithm and Analysis Platform is a data storage
-and computing platform put into service by ESA. This platform is
-available for the FRM4BIOMASS/GEO-TREES actors. The platform will be
-used to deploy the pipeline and eventually store the data from the
-project. The pipeline is, to our current knowledge, not still operative
-for production use. Once this is the case, a deployment and test of the
-pipeline on the MAAP platform will be done. This will allow us to have a
-unified reference point for the storage and access to the data, and to
-efficiently process the outputs of the pipeline.</p></li>
-<li><p><strong>Consolidation of the pipeline output
-products</strong></p>
-<p>The pipeline, in its actual form, produces several versions of DTM
-and CMH products. This has been done in order to compare different
-methods, as each version produces the product with a different
-algorithm. As the pipeline becomes mature enough, a unique algorithm
-will be selected for each product. The other products will be optionally
-produced, but not by default.</p></li>
-<li><p><strong>Formal comparison and potential merge with Maryland’s
-university pipeline</strong></p>
-<p>In the last stages of the development, a collaboration with the
-university of Maryland has been established in the context of the
-GEO-TREES project. The team from Maryland works on their own pipeline,
-open-sourced, but with different approaches compared to the ones used in
-our pipeline (notably for the DTM and CHM algorithms).</p>
-<p>The piepline source code and documentation can be found at: <a href="https://github.com/GEO-TREES/ALS_Panama" class="uri">https://github.com/GEO-TREES/ALS_Panama</a></p></li>
-<li><p><strong>Integration of the pipeline with the AGB
-estimation</strong></p>
-<ul>
-<li><p>Production ready – Landscape statistical up-scaling (BIOMASS)</p>
-<p>Use the BIOMASS package to, using plot data of the same region
-scanned by the ALS data, calibrate the allometric statistical model use
-dfor the upscaling from the plot data to the landscape data provided by
-the CHM.</p>
-<p>More information on this approach and the package itself can be found
-on: <a href="https://umr-amap.github.io/BIOMASS/index.html" class="uri">https://umr-amap.github.io/BIOMASS/index.html</a></p></li>
-<li><p>Experimental – Individual tree based simulation
-(CanopyConstructor)</p>
-<p>Use the CanopyConstructor package, which uses the CHM and plot data
-to find correspondences between simulated trees and the landscape data,
-forming a simulated forest that can be used to generate AGB plots at any
-desired raste resolution.</p>
-<p>More information on this approach and the package itself can be found
-on: <a href="https://github.com/fischer-fjd/CanopyConstructor" class="uri">https://github.com/fischer-fjd/CanopyConstructor</a></p></li>
-</ul></li>
-</ol>
 </div>
 </section>
 

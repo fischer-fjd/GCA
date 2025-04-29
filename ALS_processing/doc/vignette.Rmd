@@ -30,13 +30,18 @@ The GCA pipeline is a tool used for the generation of Digital Terrain Model (DTM
 
 The package source code can be found at: https://github.com/fischer-fjd/GCA/tree/GCA_open_source
 
-# General workflow diagram
+
+# General workflow 
+
+- Diagram
 
 The following figure shows a diagram of the pipeline workflow. 
 
 ![](workflow_diagram.png)
 
 In this figure, the blue items represent data being processed by each step, the orange items represent the processing steps of the pipeline and the green items represent the final output products of the pipeline.
+
+- Description
 
 # Input data
 
@@ -77,6 +82,11 @@ A metadata file should be provided with the data in the same folder. This file s
 -   Scan angle raster
 
 
+# Recent developments
+
+- Open source -- General functions
+
+- Open source -- Ground classification
 
 # Future work
 

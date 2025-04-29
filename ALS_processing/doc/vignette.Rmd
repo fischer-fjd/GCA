@@ -21,8 +21,21 @@ knitr::opts_chunk$set(
   collapse = TRUE, echo = TRUE,
   comment = "#>", fig.align = "center")
 require(knitr)
-require(BIOMASS)
 ```
+
+# Accronyms
+
+- **GCA**: Global Canopy Atlas
+- **DTM**: Digital Terrain Model
+- **DSM**: Digital Surface Model
+- **CHM**: Canopy Height Model
+- **ALS**: Aerial Lidar Scanning
+- **CRS**: Coordinate Reference System
+- **UTM**: Universal Transverse Mercator
+- **TIN**: Triangle Irregular Network
+- **MAAP**: Multi-Mission Algorithm and Analysis Platform
+- **ESA**: European Space Agency
+
 
 # Package description
 
@@ -33,7 +46,7 @@ The package source code can be found at: https://github.com/fischer-fjd/GCA/tree
 
 # General workflow 
 
-- Diagram
+- **Diagram**
 
 The following figure shows a diagram of the pipeline workflow. 
 
@@ -41,7 +54,10 @@ The following figure shows a diagram of the pipeline workflow.
 
 In this figure, the blue items represent data being processed by each step, the orange items represent the processing steps of the pipeline and the green items represent the final output products of the pipeline.
 
-- Description
+- **Description**
+
+TODO
+
 
 # Input data
 
@@ -54,21 +70,37 @@ A metadata file should be provided with the data in the same folder. This file s
 
 # Parameters
 
--   name_job: overall job name, used for processing stats
--   type_file: type of the files to be processed, needs to be exact (las, laz, LAS, etc.)
--   dir_dataset: folder that contains data sets
--   dir_processed: folder where processed data sets should be saved
--   path_lastools: folder to most recent lastools installation
--   tmpdir_processing: folder where processing occurs: files will be overwritten and should never be a folder that is synchronized or has slow read/write operations, i.e., no Dropbox folders, no OneDrive, and not an external hard drive resolution = 1.0 resolution of raster products (in m)
--   n_cores: number of cores for processing, keep 1-2 cores available for system operations
--   size_tile: retiling size
--   size_buffer: 25m - 50m, 50 m should be sufficient for any type of acquisition (25m may be too small for ground point classification in sparse scans)
--   force.utm: force reprojection of system into UTM (and meter) coordinates; necessary for all files that are registered in feet, otherwise output will be in feet
--   force.recompute: force reprocessing; usually set to FALSE, useful when computation has been interrupted for external reasons (power cutofff) and needs to be restarted, because only unprocessed data subsets will be reprocessed
--   remove.vlr: probably not necessary in most cases, but should be generally activated. The option leads to the removal of all vlrs AFTER the CRS of the first raster product is set. The CRS will be transmitted to all other raster products, so outputs will not be affected. By deactivating vlrs afterwards we prevent problems with further terra or lastools processing due to odd projection information, which sometimes causes an excess of warnings/errors (and shutdown of parallel processing) or blast2dem to fail
--   remove.evlr: probably not necessary in most cases, but should be generally activated. The option leads to the removal of all evlrs AFTER the CRS of the first raster product is set. The CRS will be transmitted to all other raster products, so outputs will not be affected. By deactivating evlrs afterwards we prevent problems with further terra or lastools processing due to odd projection information, which sometimes causes an excess of warnings/errors (and shutdown of parallel processing) or blast2dem to fail
--   use.blast2dem: should be activated by default as it improves (or makes possible) TIN construction in very dense point clouds, but: not tested on Linux so far
--   type_architecture: only needed if 32bit Windows should be forced; 32 can be a bit more permissive, particularly for blast2dem
+```{r table2, echo=FALSE, message=FALSE, warnings=FALSE, results='asis'}
+tabl <- "
+| Name        | Description           | Default  |
+|-:|--------------|-|
+| name_job      | Overall job name, used for processing stats | \"gca\" |
+| type_file     | Type of the files to be processed, needs to be exact (las, laz)      |   \"las\" |
+| dir_dataset   | Folder that contains data sets      |    \"\" |
+| dir_processed | Folder where processed data sets should be saved      |    \"\" |
+| path_lastools | Folder to most recent lastools installation      |    \"\" |
+| tmpdir_processing | Folder where processing occurs (files will be overwritten)       |    \"\" |
+| resolution | Resolution of raster products (in m)       |    1.0 |
+| n_cores | Number of cores for processing       |    1 |
+| size_tile | Retiling size       |    500 |
+| size_buffer | Tile buffer size       |    50 |
+| force.utm | Force reprojection of coordinate reference system into UTM (and meter) coordinates       |    True |
+| force.recompute | Force reprocessing. Only unprocessed data subsets will be reprocessed       |    False |
+"
+cat(tabl) # output the table in a format good for HTML/PDF/docx conversion
+```
+
+
+# Usage
+
+- Place the input data in the desired input folder
+
+- Complete and verify the input data metadata
+
+- Fill the desired values for each parameter
+
+- Run the main file: ALS_processing.R
+
 
 # Output products
 
@@ -88,11 +120,17 @@ A metadata file should be provided with the data in the same folder. This file s
 
 - Open source -- Ground classification
 
+# Current challenges
+
+- Finish the implementation of all open source functions
+
+
+
 # Future work
 
-1. Complete integration of the new ground classification algorithm in the pipeline
+1. **Complete integration of the new ground classification algorithm in the pipeline**
 
-	The new ground classification algorithm is intended to become a more	performant open source option compared to the existing algorithms in 	lidR/lasR.
+	The new ground classification algorithm is intended to become a more performant open source option compared to the existing algorithms in 	lidR/lasR.
 
 	This new algorithm has been tested in a standalone approach, and validated 	with real data. The next step is to integrate it in the pipeline to have a fully 	open source pipeline with performances closer to the           commercial software 	equivalents (lastools).
   
@@ -102,26 +140,26 @@ A metadata file should be provided with the data in the same folder. This file s
         
     - Wrap the C++ code in R to be able to be used directly from the R pipeline
     
-2. Re-factorization of the pipeline into subsets of modular functions
+2. **Re-factorization of the pipeline into subsets of modular functions**
 
 	The current state of the pipeline has all the sub-functions coded in a common 	source file. This lead to a complicated readability and maintenance of the code 	base. A restructuring of this code into individual source    files for each function 	will be done to better organize the repository and have a faster maintenance 	of the pipeline.
 
-3. Integration and test of the pipeline in the MAAP platform
+3. **Integration and test of the pipeline in the MAAP platform**
 
 	The Multi-Mission Algorithm and Analysis Platform is a data storage and 	computing platform put  into service by ESA. This platform is available for the 	FRM4BIOMASS/GEO-TREES actors. The platform will be used to       deploy the 	pipeline and eventually store the data from the project. 
 	The pipeline is, to our current knowledge, not still operative for production 	use. Once this is the case, a deployment and test of the pipeline on the MAAP 	platform will be done. This will allow us to have a unified    reference point for 	the storage and access to the data, and to efficiently process the outputs of 	the pipeline.
 
-4. Consolidation of the pipeline output products
+4. **Consolidation of the pipeline output products**
 
 	The pipeline, in its actual form, produces several versions of DTM and CMH 	products. This has been done in order to compare different methods, as each 	version produces the product with a different algorithm. As the pipeline 	becomes mature enough, a unique algorithm will be selected for each 	product. The other products will be optionally produced, but not by default.
 
-5. Formal comparison and potential merge with Maryland’s university pipeline
+5. **Formal comparison and potential merge with Maryland’s university pipeline**
 
 	In the last stages of the development, a collaboration with the university of 	Maryland has been established in the context of the GEO-TREES project. The 	team from Maryland works on their own pipeline, open-sourced,    but with 	different approaches compared to the ones used in our pipeline (notably for the DTM and CHM algorithms). 
 	
 	The piepline source code and documentation can be found at: https://github.com/GEO-TREES/ALS_Panama
 
-6. Integration of the pipeline with the AGB estimation
+6. **Integration of the pipeline with the AGB estimation**
 
     - Production ready -- Landscape statistical up-scaling (BIOMASS)
     

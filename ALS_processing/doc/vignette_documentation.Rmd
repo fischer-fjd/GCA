@@ -3,10 +3,6 @@ title: "Global Canopy Atlas pipeline"
 author: "Fabian Fischer et al."
 date: "`r Sys.Date()`"
 output:
-  pdf_document:
-    fig_caption: yes
-    number_sections: yes
-    toc: no
   prettydoc::html_pretty:
     number_sections: yes
     theme: "cayman"
@@ -19,6 +15,10 @@ output:
     toc: yes
     highlight: default
     fig_caption: yes
+  pdf_document:
+    fig_caption: yes
+    number_sections: yes
+    toc: no
 description: |
   Generation of Digital Terrain Model (DTM) and Canopy Heigh Model (CHM) from Aerial Lidar Scanning (ALS) data
 vignette: "%\\VignetteIndexEntry{Vignette BIOMASS} %\\VignetteEncoding{UTF-8} %\\VignetteEngine{knitr::rmarkdown}\n"
@@ -51,18 +51,17 @@ The GCA pipeline is a tool used for the generation of Digital Terrain Model (DTM
 
 The package source code can be found at: https://github.com/fischer-fjd/GCA/tree/GCA_open_source
 
-
 # General workflow 
 
 - **Diagram**
 
-The following figure shows a diagram of the pipeline workflow.
+The following diagram represents the pipeline workflow.
 
 ```{r workflow_diagram, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "100%", fig.cap = "Diagram of the GCA pipeline workflow"}
 knitr::include_graphics("resources/workflow_diagram.png")
 ```
 
-In this figure, the blue items represent data being processed by each step, the orange items represent the processing steps of the pipeline and the green items represent the final output products of the pipeline.
+In this figure, the blue items represent data being produced by a process of the pipeline that will serve as input for the next step, the orange items represent the processing steps of the pipeline and the green items represent the final output products of the pipeline.
 
 A detailed description of the pipeline's workflow is given in the following section.
 
@@ -82,27 +81,25 @@ A detailed description of the pipeline's workflow is given in the following sect
   
   6. Remove noise points
   
-  7. Classify (or reclassifiy) ground points;
+  7. Classify (or reclassifiy) ground points
   
-  8. Crop canopy heights above a user-defined ‘maximum height’ (via ‘lasheight’ function); that ‘maximum height’ is used as a very coarse point cloud filter, assuming that trees never reach such height (e.g., 125 m here);
+  8. Crop canopy heights above a user-defined ‘maximum height’ (via ‘lasheight’ function); that ‘maximum height’ is used as a very coarse point cloud filter, assuming that trees never reach such height (e.g., 125 m here)
   
-  9. Get pulse density and scan angle (as .tif files via ‘lasgrid’ function);
+  9. Get pulse density and scan angle (as .tif files)
   
-  10. Create DTMs (via ‘las2dem’ and/or ‘blast2dem’ functions);
+  10. Create DTMs
     
-  11. Create DSMs (via ‘las2dem’ and/or ‘blast2dem’ functions);
-  
-  12. Create thinned versions of DSMs (via ‘las2dem’ and/or ‘blast2dem’ functions);
+  11. Create DSMs
     
-  13. Create normalized point clouds (via ‘lasheight’ function);
+  12. Create normalized point clouds
     
-  14. Estimate laser penetration (via ‘lasgrid’ function)
+  13. Estimate laser penetration
     
-  15. Create CHMs (via ‘las2dem’, ‘lassort’, ‘lasoptimize’ and/or ‘lasclip’ functions);
+  14. Create CHMs
     
-  16. Compute canopy summary statistics from point clouds;
+  15. Compute canopy summary statistics from point clouds
     
-  17. Produce synthesis files both by tile and for all tiles (as .csv files using metadata);
+  16. Produce a final synthesis files and a set of three INFO files that document the output products
 
 
 # Input data
@@ -111,66 +108,51 @@ The pipeline takes two items as input data: the set of input pointcloud files an
 
 - **Aquisition pointcloud files**
 
-The input pointcloud data is provided in the form of a folder containing a set of pointcloud files, in format LAS (.las) or its compressed equivalent LAZ (.laz). Normally each pointcloud file corresponds to a tile of the scanned landscape. All tiles must have the same Coordinate Reference System (CRS), which should be UTM compatible.
+The input pointcloud data is provided in the form of a folder containing a set of pointcloud files, in format LAS (.las) or its compressed equivalent LAZ (.laz). Normally each pointcloud file corresponds to a tile of the scanned landscape. All tiles must have the same Coordinate Reference System (CRS).
 
-```{r lidar_tile, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "25%", fig.cap = "Top view of an example ALS data tile"}
-knitr::include_graphics("resources/lidar_tile.png")
+```{r lidar_tile, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "25%", fig.cap = "Top view of an example ALS data tile (RGB used just for visualization)"}
+    knitr::include_graphics("resources/lidar_tile.png")
 ```
 
-```{r lidar_tile_side, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "25%", fig.cap = "Side view of an example ALS data tile"}
+```{r lidar_tile_side, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "25%", fig.cap = "Side view of an example ALS data tile (RGB used just for visualization)"}
 knitr::include_graphics("resources/lidar_tile_side.png")
 ```
 
 - **Aquisition metadata file**
 
-A metadata file should be provided with the data in the same folder. This file shall contain:
-
-```{r table1, echo=FALSE, message=FALSE, warnings=FALSE, results='asis'}
-tabl <- "
-|     General information |
-|:---|-----------|
-| Site name | Nouragues |
-| Acquisition date | 15/11/2022 |
-| Covered area  | 32 km2 |
-| Pulse density  | 61.2 m-2 |
-| Point density | 133.8 m-2 |
-| Laser type | VQ 780II RIEGL |
-| Wavelength | 1064 nm |
-| Beam divergence | < 0.25 mrad (1/e2) |
-| Vehicle  | Airplane BN2 |
-| Operator | Altoa |
-
-|     Point cloud data |
-|:---|-----------|
-| Data format | Las 1.4 (.laz) |
-| Tile number | 128 |
-| Tile size  | 500 × 500 m  |
-
-|     Acquisition parameters |
-|:---|-----------|
-| Swath angle | ± 20 degrees |
-| Pulse Repetition Rate (PRR) | ~ 1000 kHz |
-| Ground footprint size of pulse  | ~ 0.16 m  |
-| Flight height | 650 m AGL |
-| Acquisition mode | online digitization |
-| Note(s) | low altitude clouds forced acquisition altitude |
-
-|     ROI bounding box |
-|:---|-----------|
-| Coordinate Reference System (CRS)  | EPSG:2972 |
-| xmin   | 312000 |
-| xmax  | 315458.9 |
-| ymin  | 443000 |
-| ymax  | 453500 |
-
-|     Contextual info |
-|:---|-----------|
-| Funding  | ANR Labex CEBA |
-| Contact   | Grégoire Vincent (gregoire.vincent@ird.fr) |
-"
-cat(tabl) # output the table in a format good for HTML/PDF/docx conversion
-```
-
+  A metadata file should be provided with the data in the same folder. This file shall contain:
+      
+    - General information
+      - Site name
+      - Acquisition date
+      - Covered area
+      - Pulse density
+      - Point density
+      - Laser type
+      - Wavelength
+      - Beam divergence
+      - Vehicle
+      - Operator
+    
+    - Point cloud data
+      - Data format
+      - Tile number
+      - Tile size
+      
+    - Acquisition parameters
+      - Swath angle
+      - Pulse Repetition Rate (PRR)
+      - Ground footprint size of pulse
+      - Flight height
+      - Acquisition mode
+      - Note(s)
+      
+    - ROI bounding box
+      - Coordinate Reference System (CRS)
+      - xmin
+      - xmax
+      - ymin
+      - ymax
 
 
 # Parameters
@@ -208,9 +190,13 @@ The GCA pipeline is a complete application that takes files as an input and will
 
 - Fill the desired values for each parameter
 
-- Run the main file: ALS_processing.R
+- Run the main file: ALS_processing_v.x.x.x.R (where x.x.x is the desired version of the pipeline)
 
 Then, the pipeline will process the data and generate the output products, which will be placed at the directory defined by the "dir_processed" parameter.
+
+Note that currently, the pipeline requires a recent distribution of the LiDAR processing software LAStools (https://rapidlasso.de/product-overview/) as well as a valid license. Efforts are underway to developing and incorporating counterparts to all the LAStools-based functions that would eventually rely on functions from the lidR (https://cran.r-project.org/web/packages/lidR/index.html) and lasR (https://r-lidar.github.io/lasR/) R packages, before benchmarking output scripts (e.g., in terms of speed) and products.
+
+The general setting of the pipeline involves three folders: “01_raw”, “02_ancillary” and “03_processed”. The “01_raw” folder contains the input data (raw data plus metadata file) that is necessary for data processing. This file will be used to update information that can not be directly extracted from the scan, among which key information is data citation/website/contact + coordinate reference system (EPSG code) + temporal acquisition range (minimum and maximum date). The “02_ancillary” folder contains the pipeline scripts. There are at least two of them, named e.g. “ALS_processing_helperfunctions_v.x.x.x.R” and “ALS_processing_v.x.x.x.R”, with the latter hosting the different user-defined parameters to be used for data processing). The third folder, “03_processed”, contains the processed products mentioned above, as well as several “_INFO_” files produced at the end of processing. 
 
 
 # Output products
@@ -220,20 +206,29 @@ This section describes the output products generated by the pipeline. An example
 - Digital Terrain Model (DTM)
 
   Several versions of the DTM are generated by the pipeline:
-    - Supplied
+  
+    - dtm_supplied
     
       DTM generated using the original ground classification provided by the acquisition data
       
-    - Highest
+    - dtm_highest
     
       DTM generated using the ground classification generated by the pipeline, and using only the highest ground points.
       
-    - TIN
+    - dtm_asdef
     
-      DTM generated using the ground classification generated by the pipeline, and genrating TIN over these ground points.
+      Computed from default ground classification and Delaunay-triangulation. Useful as baseline and for comparisons across datasets.
       
-```{r BCI_DTM, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "50%", fig.cap = "DTM for the BCI dataset"}
-knitr::include_graphics("resources/BCI_DTM.png")
+    - dtm_lasfine
+    
+      Refined DTM, created with more sensitive parameters. Useful in conjunction with the lasdef product to assess robustness of ground modelling.
+      
+    - dtm
+    
+      The default terrain model used by the processing pipeline. Based on the default ground classification, but refined to improve accuracy in steep areas.
+      
+```{r BCI_DTM, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "50%", fig.cap = "Example output: DTM (dtm version) for the BCI dataset [m]"}
+knitr::include_graphics("resources/BCI_DTM_legend.png")
 ```
 
   
@@ -242,20 +237,20 @@ knitr::include_graphics("resources/BCI_DTM.png")
 
   Several versions of the CHM are generated by the pipeline:
   
-    - Highest
+    - chm_highest
     
       CHM generated by creating a TIN over the highest returns of the pointcloud.
       
-    - TIN
+    - chm_tin
     
       CHM generated by creating a TIN over the first returns of the pointcloud.
       
-    - Lspikefree
+    - chm_lspikefree
     
       CHM generated with the lspike free algorithm, a more sophisticated version based on the TIN approach that focuses on removing possible spikes in the CHM.
       
-```{r BCI_CHM, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "50%", fig.cap = "CHM for the BCI dataset"}
-knitr::include_graphics("resources/BCI_CHM.png")
+```{r BCI_CHM, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "50%", fig.cap = "Example output: CHM (lspikefree) for the BCI dataset [m]"}
+knitr::include_graphics("resources/BCI_CHM_legend.png")
 ```
 
   
@@ -263,16 +258,16 @@ knitr::include_graphics("resources/BCI_CHM.png")
 
   A raster generated over the ROI that shows the number of pulses per square meter. This pulse density is important to have an idea of the data coverage of the studied region, which is a main data quality metric.
   
-```{r BCI_pulsedensity, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "50%", fig.cap = "Pulse density raster for the BCI dataset"}
-knitr::include_graphics("resources/BCI_pulsedensity.png")
+```{r BCI_pulsedensity, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "50%", fig.cap = "Pulse density raster for the BCI dataset [pulses/m2]"}
+knitr::include_graphics("resources/BCI_pulsedensity_legend.png")
 ```
 
 -   Scan angle raster
 
   A raster generated over the ROI that shows the maximum beam angle per square meter. The scan angle is directly related to the intensity of the laser return and the laser penetration, which is of great importance for the study of forest canopies.
   
-```{r BCI_scanangle, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "50%", fig.cap = "Scan angle raster for the BCI dataset"}
-knitr::include_graphics("resources/BCI_scanangle.png")
+```{r BCI_scanangle, echo=FALSE, message=FALSE, warnings=FALSE, fig.align = 'center', out.width = "50%", fig.cap = "Scan angle raster for the BCI dataset [degrees]"}
+knitr::include_graphics("resources/BCI_scanangle_legend.png")
 ```
 
 

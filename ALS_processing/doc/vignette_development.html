@@ -12,7 +12,7 @@
 
 <meta name="author" content="Fabian Fischer et al." />
 
-<meta name="date" content="2025-04-29" />
+<meta name="date" content="2025-04-30" />
 
 <title>Global Canopy Atlas pipeline</title>
 
@@ -64,45 +64,181 @@ code span.er { color: #a61717; background-color: #e3d2d2; }
 <h1 class="title toc-ignore project-name">Global Canopy Atlas
 pipeline</h1>
 <h4 class="author project-author">Fabian Fischer et al.</h4>
-<h4 class="date project-date">2025-04-29</h4>
+<h4 class="date project-date">2025-04-30</h4>
 </section>
 
 
 <div id="TOC" class="toc">
 <div class="toc-box">
 <ul>
-<li><a href="#recent-developments" id="toc-recent-developments"><span class="toc-section-number">1</span> Recent developments</a></li>
-<li><a href="#current-challenges" id="toc-current-challenges"><span class="toc-section-number">2</span> Current challenges</a></li>
-<li><a href="#future-work" id="toc-future-work"><span class="toc-section-number">3</span> Future work</a></li>
+<li><a href="#list-of-accronyms" id="toc-list-of-accronyms"><span class="toc-section-number">1</span> List of accronyms</a></li>
+<li><a href="#introduction" id="toc-introduction"><span class="toc-section-number">2</span> Introduction</a></li>
+<li><a href="#motivation" id="toc-motivation"><span class="toc-section-number">3</span> Motivation</a></li>
+<li><a href="#development" id="toc-development"><span class="toc-section-number">4</span> Development</a></li>
+<li><a href="#current-challenges" id="toc-current-challenges"><span class="toc-section-number">5</span> Current challenges</a></li>
+<li><a href="#future-work" id="toc-future-work"><span class="toc-section-number">6</span> Future work</a></li>
 </ul>
 </div>
 </div>
 
 <section class="main-content">
-<div id="recent-developments" class="section level1" number="1">
-<h1><span class="header-section-number">1</span> Recent
-developments</h1>
-<p>Most of th erecent effort on the development of th epipeline has been
-allocated towards the substitution of functions from commertial software
-by open source functions. This effort has been divided in two disctinct
-parts: the subtitution of generic functions related to filtering,
-cropping, reformatting, reprojecting the data and the development of
-dedicated functions that did not have an open source equivalent (in
-terms of availability and performance), such as the ground
-classification.</p>
+<div id="list-of-accronyms" class="section level1" number="1">
+<h1><span class="header-section-number">1</span> List of accronyms</h1>
 <ul>
-<li><p>Open source – Ground classification</p></li>
-<li><p>Open source – General functions</p></li>
+<li><strong>GCA</strong>: Global Canopy Atlas</li>
+<li><strong>DTM</strong>: Digital Terrain Model</li>
+<li><strong>DSM</strong>: Digital Surface Model</li>
+<li><strong>CHM</strong>: Canopy Height Model</li>
+<li><strong>ALS</strong>: Aerial Lidar Scanning</li>
+<li><strong>CRS</strong>: Coordinate Reference System</li>
+<li><strong>UTM</strong>: Universal Transverse Mercator</li>
+<li><strong>TIN</strong>: Triangle Irregular Network</li>
+<li><strong>MAAP</strong>: Multi-Mission Algorithm and Analysis
+Platform</li>
+<li><strong>ESA</strong>: European Space Agency</li>
 </ul>
 </div>
-<div id="current-challenges" class="section level1" number="2">
-<h1><span class="header-section-number">2</span> Current challenges</h1>
+<div id="introduction" class="section level1" number="2">
+<h1><span class="header-section-number">2</span> Introduction</h1>
+<p>The current document summarizes the development work being done on
+the Global Canopy Atlas pipeline in the context of the FRM4BIOMASS
+project.</p>
+<p>The Global Canopy Atlas pipeline is composed by a series of functions
+that process Aerial Scanning Lidar (ALS) data in order to produce
+Digital Terrain Model (DTM) and Canopy Height Model (CHM) rasters of the
+study area as output product. The pipeline takes as input a set lidar
+pointcloud files of the target region, preprocesses them to ensure the
+quality of the data, classifies the ground points and then produces the
+DTM and CHM products. The purpose of this processing is to use these
+products for the generation of Above Ground Biomass (AGB) rasters of the
+target region.</p>
+<p>The pipeline repository, with source code and documentation, can be
+found at: <a href="https://github.com/fischer-fjd/GCA" class="uri">https://github.com/fischer-fjd/GCA</a></p>
+<p>This pipeline is in an advanced state of development, with a thorough
+data validation process that focuses on robustness and reliability. This
+work is presented in: <a href="https://besjournals.onlinelibrary.wiley.com/doi/10.1111/2041-210X.14416" class="uri">https://besjournals.onlinelibrary.wiley.com/doi/10.1111/2041-210X.14416</a></p>
+<p>On the development side, the pipeline is fully implemented in R, with
+a strong dependency on a commercial software called lastools, a
+reference library in the lidar processing environment.</p>
+</div>
+<div id="motivation" class="section level1" number="3">
+<h1><span class="header-section-number">3</span> Motivation</h1>
+<p>The motivation of this development project is to make the pipeline
+completely open source. The main purposes of this evolution are to:</p>
 <ul>
-<li>Finish the implementation of all open source functions</li>
+<li><p>Make the pipeline accessible for all the forest ecology
+community, so anyone can contribute and use the pipeline</p></li>
+<li><p>Make the pipeline usable by forest ecology actors that can not or
+do not desire to acquire commercial licenses</p></li>
+<li><p>Have a better understanding and control of the algorithms used by
+the pipeline</p></li>
+<li><p>Integrate the pipeline in the MAAP computing platform, which only
+accepts open source applications</p></li>
+</ul>
+<p>For this, the pipeline needs to be modified to guarantee:</p>
+<ul>
+<li><p>Open source status for all functions used in the pipeline. The
+pipeline must be open, modifiable and free.</p></li>
+<li><p>Documentation of the whole workflow and of each individual
+function</p></li>
+<li><p>Direct integration of the pipeline on MAAP in order to have an
+easy and unified access to the processing of the data</p></li>
 </ul>
 </div>
-<div id="future-work" class="section level1" number="3">
-<h1><span class="header-section-number">3</span> Future work</h1>
+<div id="development" class="section level1" number="4">
+<h1><span class="header-section-number">4</span> Development</h1>
+<p>The open source migration effort has been divided in two distinct
+parts: the substitution of generic pointcloud data processing functions
+(filtering, cropping, thinning, reprojecting, …), which more commonly
+have an existing open source implementation, and the development of
+dedicated functions that do not have an open source equivalent (in terms
+of availability and performance compared to commercial software), such
+as the ground classification algorithm. Both are explained in detail in
+the following sections:</p>
+<ul>
+<li><p><strong>Open source – Ground classification</strong></p>
+<p>The motivation for this development is the fact that the current open
+source algorithms for ground classification available on the lidR/lasR
+packages do not have performances with an output quality comparable to
+that of lastools, the commercial software used by the pipeline.</p>
+<p>Two main forest scenarios have been identified as challenging for
+ground classification:</p>
+<ul>
+<li><p><strong>Rough terrain</strong></p>
+<p>Most ground classification algorithms are based on the detection of a
+continuous, relatively smooth surface defined by the last returns of the
+forest pointcloud, which represent the ground of the studied region.
+However, in rough terrain scenarios this smoothness is no longer so
+obvious to satisfy: an algorithm with a sufficient sensitivity to detect
+abrupt elevation changes will struggle on the classification, often
+producing false positives on points that belong to low vegetation. The
+most performant available open source algorithms will tend to over
+enforce smoothness, and the miss rough terrain sectors.</p></li>
+<li><p><strong>Dense canopies</strong></p>
+<p>Dense canopy scenarios tend to be problematic for ground
+classification due to the fact that laser beams will statistically have
+fewer returns on the ground, as some regions will have sufficiently
+dense canopy that the laser beams have no or little returns on the
+ground. The ground classification in these regions will be challenging
+as this lack of ground observability can lead to the classification of
+vegetation points as ground.</p></li>
+</ul>
+<p>In the context of this work, a review of the state of the art,
+selection of the most promising method and its implementation have been
+conducted. The implemented method has been evaluated and the results
+compared with the commercial method, lastools, and with the open source
+method, available in the lasR/lidR packages. A full report on this
+activity is in the final stages of development.</p></li>
+<li><p><strong>Open source – General functions</strong></p>
+<p>The GCA pipeline has dependencies on commercial software also for a
+whole set of functions that pre process and post process the data along
+the DTM and CHM generation process. All these functions have to be
+substituted by an equivalent open source function. The approach of this
+work is based on the idea of using existing software functions in lidR
+(<a href="https://r-lidar.github.io/lidRbook/" class="uri">https://r-lidar.github.io/lidRbook/</a>) and lasR (<a href="https://github.com/r-lidar/lasR" class="uri">https://github.com/r-lidar/lasR</a>).</p>
+<p>This work has been conducted for most of the pipeline. The open
+source equivalent for the generation of the CHM rasters, the last step
+of the pipeline, is still under development.</p></li>
+</ul>
+</div>
+<div id="current-challenges" class="section level1" number="5">
+<h1><span class="header-section-number">5</span> Current challenges</h1>
+<p>The development of the open source version of the pipeline is in its
+final stages of development. However, some challenges have still to be
+addressed:</p>
+<ul>
+<li><p>Finish the implementation of all open source functions</p>
+<p>The integration of the open source equivalents for each lastools
+function has not been as straight forward as initially expected. This is
+due to three main reasons:</p>
+<ul>
+<li><p>The relatively big extent of the use of lastools commertial
+sofware in the pipeline</p>
+<p>Almost every function of the pipeline has to be modified to be
+replaced by its open source alternative.</p></li>
+<li><p>The different data processing philosophies between lidR/lasR and
+lastools</p>
+<p>Lastools does not come with an R encapslation allowing for its direct
+usage on R scripts. For this reason, each lastools function is executed
+through a R system call that will take a set of files both as input and
+output.</p>
+<p>LasR and lidR both are integrated on R, either throug encapsulation
+of precompiled code or directly coded in R. This allows for the input
+and output of each function to be directly passed as arguments between
+each stage of the pipeline.</p>
+<p>This difference in philosphies makes the development of th eopen
+source version involve also an architectural review of the pipeline
+stages.</p></li>
+<li><p>The lack of obvious lidR/lasR alternative, for which other more
+low level R packages have to be used, as for example terra.</p>
+<p>A direct open source equivalent can be found for some function of the
+pipeline, but a new function has to be coded in R for some other stages
+of the pipeline.</p></li>
+</ul></li>
+</ul>
+</div>
+<div id="future-work" class="section level1" number="6">
+<h1><span class="header-section-number">6</span> Future work</h1>
 <ol style="list-style-type: decimal">
 <li><p><strong>Complete integration of the new ground classification
 algorithm in the pipeline</strong></p>

@@ -71,27 +71,27 @@ path = dirname(rstudioapi::getSourceEditorContext()$path)
 setwd(path)
 
 # load helper functions
-file_helperfunctions = "./ALS_processing_helperfunctions_v.1.0.0.R"
+file_helperfunctions = "./ALS_processing_helperfunctions_v.1.0.1.R"
 source(file_helperfunctions)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
 ##### 2. Processing parameters (fixed tile size) #####
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
 # standard processing script, using a fixed tile size
-name_job = "test_pipeline"                               # overall job name, used for processing stats
+name_job = "gca"                               # overall job name, used for processing stats
 type_file = "laz" # type of the files to be processed, needs to be exact (las, laz, LAS, etc.)
 dir_dataset = "../01_raw"                    # folder that contains data sets
 dir_processed =  "../03_processed"      # folder where processed data sets should be saved
 path_lastools = "PATH/TO/LASTOOLS/BIN" # folder to most recent lastools installation
 tmpdir_processing = "PATH/TO/TEMPORARY/DIRECTORY"   #!!!: folder where processing occurs: files will be overwritten and should never be a folder that is synchronized or has slow read/write operations, i.e., no Dropbox folders, no OneDrive, and not an external hard drive
 resolution = 1.0       # resolution of raster products (in m)
-n_cores = 4          # number of cores for processing, keep 1-2 cores available for system operations
-size_tile = 250        # retiling size
+n_cores = 10         # number of cores for processing, keep 1-2 cores available for system operations
+size_tile = 500        # retiling size
 size_buffer = 50       # 25m - 50m, 50 m should be sufficient for any type of acquisition (25m may be too small for  ground point classification in sparse scans)
 force.utm = "from_metadata"          # force reprojection of system into UTM (and meter) coordinates; necessary for all files that are registered in feet, otherwise output will be in feet
 force.recompute = F    # force reprocessing; usually set to FALSE, useful when computation has been interrupted for external reasons (power cutofff) and needs to be restarted, because only unprocessed data subsets will be reprocessed
-remove.vlr = F    # probably not necessary in most cases, but should be tried out if there are issues with geo-referencing or processing suddenly stops. The option leads to the removal of all vlrs AFTER the CRS of the first raster product is set. The CRS will be transmitted to all other raster products, so outputs will not be affected. By deactivating vlrs afterwards we prevent problems with further terra or lastools processing due to odd projection information, which sometimes causes an excess of warnings/errors (and shutdown of parallel processing) or blast2dem to fail
-remove.evlr = F   # probably not necessary in most cases, but should be tried out if there are issues with geo-referencing or processing suddenly stops. The option leads to the removal of all evlrs AFTER the CRS of the first raster product is set. The CRS will be transmitted to all other raster products, so outputs will not be affected. By deactivating evlrs afterwards we prevent problems with further terra or lastools processing due to odd projection information, which sometimes causes an excess of warnings/errors (and shutdown of parallel processing) or blast2dem to fail
+remove.vlr = T    # probably not necessary in most cases, but should be generally activated. The option leads to the removal of all vlrs AFTER the CRS of the first raster product is set. The CRS will be transmitted to all other raster products, so outputs will not be affected. By deactivating vlrs afterwards we prevent problems with further terra or lastools processing due to odd projection information, which sometimes causes an excess of warnings/errors (and shutdown of parallel processing) or blast2dem to fail
+remove.evlr = T   # probably not necessary in most cases, but should be generally activated. The option leads to the removal of all evlrs AFTER the CRS of the first raster product is set. The CRS will be transmitted to all other raster products, so outputs will not be affected. By deactivating evlrs afterwards we prevent problems with further terra or lastools processing due to odd projection information, which sometimes causes an excess of warnings/errors (and shutdown of parallel processing) or blast2dem to fail
 
 process.dataset(
   name_job = name_job
@@ -107,7 +107,7 @@ process.dataset(
   , force.utm = force.utm
   , remove.vlr = remove.vlr
   , remove.evlr = remove.evlr
-  #, type_architecture = "32" # only needed if 32bit Windows should be forced
+  , type_architecture = "32" # only needed if 32bit Windows should be forced
   # , patterns_skip = c("/Danum","/Vizzavona","/ChapitrePetitBuech") # skipping the processing of some folders
 )
 

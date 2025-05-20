@@ -35,8 +35,8 @@ make.info = function(path_output = "", name_file = "_INFO_.txt", params_general)
   
   if(path_output != ""){
     # get current version of the script
-    path_script_split = tstrsplit(basename(rstudioapi::getSourceEditorContext()$path), "_")
-    version_pipeline = gsub("v","", gsub("v.","",gsub(".R","", path_script_split[length(path_script_split)][[1]], fixed = T), fixed = T))
+    #path_script_split = tstrsplit(basename(rstudioapi::getSourceEditorContext()$path), "_")
+    version_pipeline = "v.1.1.0" #gsub("v","", gsub("v.","",gsub(".R","", path_script_split[length(path_script_split)][[1]], fixed = T), fixed = T))
     
     # make output file
     file_output = file.path(path_output, name_file)
@@ -784,11 +784,15 @@ summarize.lidR = function(lasfile){
   points_ground = nrow(las.ground@data)
   fraction_ground = points_ground/points
   area = as.numeric(st_area(las))
+  
+  mingps = min(las@data[,"gpstime"], na.rm=T)
+  maxgps = max(las@data[,"gpstime"], na.rm=T)
+  
   pulses = las@header[["Number of points by return"]][1]
   density_points = if(area > 0) points/area else as.numeric(NA)
   density_pulses = if(area > 0) pulses/area else as.numeric(NA)
   spacing_pulses = if(density_pulses > 0) sqrt(1/density_pulses) else as.numeric(NA)
-  return(data.table(classified = ifelse(points_ground != 0, TRUE, FALSE), points = points, points_ground = points_ground, fraction_ground = fraction_ground, density_points = density_points, density_pulses = density_pulses, spacing_pulses = spacing_pulses))
+  return(data.table(classified = ifelse(points_ground != 0, TRUE, FALSE), points = points, points_ground = points_ground, fraction_ground = fraction_ground, density_points = density_points, density_pulses = density_pulses, spacing_pulses = spacing_pulses, area = area, mingps = mingps, maxgps = maxgps))
 }
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
@@ -1699,14 +1703,14 @@ lasinfo = function(params_general, path_output = ""){
 
   # lasinfo files are only created with lastools, the summary, however, is created for both files
   summary_bytile = NULL
-
+  
+  # define output directory
+  if(path_output == ""){
+    path_output = file.path(params_general$path_data,"lasinfo")
+  }
+  if(!dir.exists(path_output)) dir.create(path_output)
+  
   if(!is.voidstring(params_general$path_lastools)){
-
-    # define output directory
-    if(path_output == ""){
-      path_output = file.path(params_general$path_data,"lasinfo")
-    }
-    if(!dir.exists(path_output)) dir.create(path_output)
 
     # pass lastools command to system
     return_system = system(
@@ -1738,8 +1742,10 @@ lasinfo = function(params_general, path_output = ""){
       summary_bytile = summary_bytile[area > 0] # new in v.47
     }
   } else {
+    cat("open source info called...\n")
     files.input = list.files(path = params_general$path_data,pattern = paste0("\\.",params_general$type_file), full.names = TRUE)
     summary_bytile = rbindlist(lapply(files.input, summarize.lidR))
+    cat("open source info done!\n")
   }
 
   # get current date time to determine maximum time stamp possible
@@ -1752,6 +1758,14 @@ lasinfo = function(params_general, path_output = ""){
   summary_full = NULL
   if(!is.null(summary_bytile)){
     cat("Computing summary statistics")
+    
+    cat(paste0("nrow(summary_bytile)", nrow(summary_bytile), "\n"))
+    cat(paste0("nrow(summary_bytile$area)", nrow(summary_bytile$area), "\n"))
+    cat(paste0("nrow(summary_bytile$points)", nrow(summary_bytile$points), "\n"))
+    cat(paste0("nrow(summary_bytile$points_ground)", nrow(summary_bytile$points_ground), "\n"))
+    
+    print(summary_bytile)
+    
     summary_full = data.table(
       n_files = nrow(summary_bytile),
       classified = ifelse(all(summary_bytile[!is.na(classified)]$classified),TRUE,FALSE),
@@ -2825,6 +2839,8 @@ normalize.pointcloud = function(params_general, path_output = "", path_dtm = "",
         }
       }
     }
+    
+    lasindex(params_general)
   }
 
   if(params_general$cleanup == T) cleanup.files(params_general$path_data)
@@ -2833,7 +2849,6 @@ normalize.pointcloud = function(params_general, path_output = "", path_dtm = "",
     cat("Amending file path and reindexing\n")
     params_general$path_data = path_output
     params_general$type_file = "laz"
-    lasindex(params_general)
     cat("Amended file path returned\n")
     return(params_general)
   }
@@ -2933,6 +2948,23 @@ las2dem = function(params_general, path_output = "", name_raster = "", kill, ste
       dsm  <- rasterize(1, tri_dsm) # input is a character vector
       pipeline <- read + tri_dsm + dsm
       exec(pipeline, on = params_general$path_data)
+      
+      tiles_pointcloud = list.files(params_general$path_data, pattern = paste0(".",params_general$type_file), full.names = T)
+      files_names.input = list.files(params_general$path_data, pattern = paste0(".",params_general$type_file), full.names = F)
+      
+      for(i in 1:length(tiles_pointcloud))
+      {
+        
+        tri_dsm  <- triangulate(filter = keep_first())
+        dsm  <- rasterize(1, tri_dsm, ofile = file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif"))) # input is a character vector
+        pipeline <- read + tri_dsm + dsm
+        
+        exec(pipeline,
+             on = tiles_pointcloud[i],
+             ncores = 8,
+             with = list(chunk = 250),
+             progress = FALSE)
+      }
       
     } else {
       cat("Input option", option, "is not known. Please provide either DTM or DSM")
@@ -3127,6 +3159,33 @@ make.dtm_highest = function(params_general, path_output = "", name_raster = "dtm
       )
     )
   }
+  else
+  {
+    cat("\nGenerate make.dtm_highest open source called...\n")
+    tiles_pointcloud = list.files(params_general$path_data, pattern = paste0(".",params_general$type_file), full.names = T)
+    files_names.input = list.files(params_general$path_data, pattern = paste0(".",params_general$type_file), full.names = F)
+    
+    for(i in 1:length(tiles_pointcloud))
+    {
+      original_dtm_pipeline = reader() +
+        
+        filter_with_grid(step, operator = "max", filter = "") +
+        
+        dtm(res = step, add_class = NULL, ofile = file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")))
+      
+      exec(original_dtm_pipeline,
+           on = tiles_pointcloud[i],
+           ncores = 8,
+           with = list(chunk = 250),
+           progress = FALSE)
+    }
+    
+    
+    
+    #params_general$path_data = path_output
+    params_general$type_file = "laz"
+    cat("\nGenerate make.dtm_highest open source done!\n")
+  }
   
   time_end = Sys.time()
   time_processing = difftime(time_end,time_start,units = "mins")
@@ -3159,6 +3218,33 @@ make.dsm_highest = function(params_general, path_output = "", name_raster = "dsm
         ifelse(params_general$type_os == "Linux","2>&1", "") # crucial for Linux where LAStools seems to write to stderr
       )
     )
+  }
+  else
+  {
+    cat("\nGenerate make.dsm_highest open source called...\n")
+    tiles_pointcloud = list.files(params_general$path_data, pattern = paste0(".",params_general$type_file), full.names = T)
+    files_names.input = list.files(params_general$path_data, pattern = paste0(".",params_general$type_file), full.names = F)
+    
+    for(i in 1:length(tiles_pointcloud))
+    {
+      original_dtm_pipeline = reader() +
+      
+      triangulate(filter = keep_first()) +
+      
+      rasterize(step, ofile = file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")))
+
+      exec(original_dtm_pipeline,
+           on = tiles_pointcloud[i],
+           ncores = 8,
+           with = list(chunk = 250),
+           progress = FALSE)
+    }
+    
+    
+    
+    #params_general$path_data = path_output
+    params_general$type_file = "laz"
+    cat("\nGenerate make.dsm_highest open source done!\n")
   }
 
   time_end = Sys.time()
@@ -4344,8 +4430,8 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           {
             cat("\nGenerate initial classifications raster called...\n")
             
-            path_output = file.path(params_general$path_data, "lasgrid")
-            if(!dir.exists(path_output)) dir.create(path_output,recursive = T)
+            path_output_local = file.path(params_general$path_data, "lasgrid")
+            if(!dir.exists(path_output_local)) dir.create(path_output_local,recursive = T)
             
             files.input = list.files(path = params_general$path_data, pattern = "\\.laz", full.names = TRUE)
             files_names.input = list.files(path = params_general$path_data, pattern = "\\.laz", full.names = FALSE)
@@ -4363,7 +4449,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
               
               terra::crs(initial_classification_raster) = crs_scan
               
-              terra::writeRaster(initial_classification_raster, file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")), filetype = "GTiff", overwrite = TRUE)
+              terra::writeRaster(initial_classification_raster, file.path(path_output_local, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")), filetype = "GTiff", overwrite = TRUE)
               cat("\nprocessing file ok\n")
             }
             
@@ -4541,9 +4627,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           #%%%%%%%%%%%%%%%%%%%%%%%%%%#
           cat("\nGet summary stats\n")
           #%%%%%%%%%%%%%%%%%%%%%%%%%%#
-          
-          if(!is.voidstring(params_general$path_lastools))
-          {
+
           lasinfo(params_general = params_general)
           load(file.path(params_general$path_data,"summary_bytile.RData"))
           load(file.path(params_general$path_data,"summary_full.RData"))
@@ -4551,7 +4635,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           # add infos on ground classification
           summary_full$time_ground_basic = time_ground_basic
           summary_full$time_ground_refinement = time_ground_refinement
-          }
+          
 
           #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
           cat("\nGet pulse density and scan angle\n")
@@ -4626,7 +4710,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           step_processing = paste0("create DTMs")
 
           time_dtm_lasdef = las2dem(params_general = params_general, path_output = "", name_raster = "dtm_lasdef", kill = 200, step = resolution, type_output = "tif", option = "dtm")
-          #summary_full$time_dtm_lasdef = time_dtm_lasdef
+          summary_full$time_dtm_lasdef = time_dtm_lasdef
 
           path_dtm_lasdef = file.path(params_general$path_data,"dtm_lasdef")
           files_dtm_lasdef = list.files.nonzero(path = path_dtm_lasdef, pattern = ".tif", full.names = TRUE)
@@ -4644,7 +4728,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           # time_dtm_refined = las2dem(params_general = params_general, path_output = "", name_raster = "dtm_refined", kill = 200, step = resolution, type_output = "tif", option = "dtm_refined")
 
           time_dtm = make.dtm_nooverhangs(params_general = params_general, path_output = "", name_raster = "dtm", kill = 200, step = resolution, type_output = "tif",classes_ground = "2 8",threshold_drop = 10)
-          #summary_full$time_dtm = time_dtm
+          summary_full$time_dtm = time_dtm
 
           path_dtm = file.path(params_general$path_data,"dtm")
           files_dtm = list.files.nonzero(path = path_dtm, pattern = ".tif", full.names = TRUE)
@@ -4657,18 +4741,22 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
 
           writeRaster(dtm, filename = file.path(path_output,paste0("dtm",addendum_name,".tif")), overwrite = T)
 
+          
+          cat("\nWrite dtm masks\n")
           # now define pulse density percentages with respect to dtm
           perc_pd02 = 100 * max(0, as.numeric(global(dtm,"notNA") - global(mask_pd02,"notNA")))/as.numeric(global(dtm,"notNA"))
           perc_pd04 = 100 * max(0, as.numeric(global(dtm,"notNA") - global(mask_pd04,"notNA")))/as.numeric(global(dtm,"notNA"))
 
           # now write out rasters depending on whether there is actually any improvement
           diff_refinement = dtm - dtm_lasdef
-          mat_circular = focalMat(diff_refinement, 10, type = "circle") # draw a 10 circle around each point
+          mat_circular = terra::focalMat(diff_refinement, 10, type = "circle") # draw a 10 circle around each point
           mat_circular[mat_circular != 0] = 1
-          diff_refinement_smoothed = focal(diff_refinement, w = mat_circular, "mean", na.rm = T)
+          diff_refinement_smoothed = terra::focal(diff_refinement, w=mat_circular, fun="mean", na.rm=T)
           mask_steep = ifel(diff_refinement_smoothed > -0.5 & diff_refinement_smoothed < 0.5, 1, NA)
           writeRaster(mask_steep, filename = file.path(path_output,paste0("mask_steep",addendum_name,".tif")), overwrite = T)
-
+          
+          cat("\nWrite dtm masks done!\n")
+          
           # get percentage of steep areas
           perc_steep = 100 * max(0,as.numeric(global(diff_refinement_smoothed,"notNA") - global(mask_steep,"notNA")))/as.numeric(global(diff_refinement_smoothed,"notNA"))
 
@@ -4680,536 +4768,550 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           outline_localCRS = as.polygons(outline_localCRS, values = F)
           outline_localCRS = fillHoles(outline_localCRS)
 
-      #     # new in v.48
-      #     # use standard algorithms to create specific dtm styles (wilderness/nature)
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     cat("\nCreating additional DTM layers\n")
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     # new in v.48
-      # 
-      #     # also add a layer with the basic ground points
-      #     make.dtm_highest(params_general = params_general,path_output = "", name_raster = "dtm_highest", type_output = "tif", step = resolution, subcircle = 1, classes = "2 8")
-      #     path_dtm_highest = file.path(params_general$path_data,"dtm_highest")
-      #     files_dtm_highest = list.files.nonzero(path = path_dtm_highest, pattern = ".tif", full.names = TRUE)
-      #     dtm_highest = vrt(files_dtm_highest); terra::crs(dtm_highest) = crs_scan
-      #     if(ext(pulsedensity) != ext(dtm_highest)){
-      #       cat("Warning! DTM extent is off and will be adjusted!\n")
-      #       dtm_highest = crop(extend(dtm_highest,pulsedensity),pulsedensity)
-      #     }
-      #     
-      #     writeRaster(dtm_highest, filename = file.path(path_output,paste0("dtm_highest",addendum_name,".tif")), overwrite = T)
-      #     
-      #     # now create a mask for NA values in the DTM
-      #     minradius_NA = 15
-      #     dtm_nona_agg = aggregate(ifel(is.na(dtm_highest),NA,1), fact = 5, fun = "mean", na.rm = T)
-      #     mat_circular = focalMat(dtm_nona_agg, minradius_NA, type = "circle") # draw a circle around each point
-      #     mat_circular[mat_circular != 0] = 1
-      #     dtm_nona_agg = focal(dtm_nona_agg, w = mat_circular, fun = "mean", na.rm = T)
-      #     mask_ground = focal(ifel(is.na(dtm_nona_agg),1,NA), w = mat_circular, fun = "mean", na.rm = T)
-      #     mask_noground = ifel(is.na(mask_ground), 1, NA)
-      #     mask_noground = resample(mask_noground, dtm_highest)
-      #     writeRaster(mask_noground, filename = file.path(path_output,paste0("mask_noground",addendum_name,".tif")), overwrite = T)
-      #     
-      #     # get percentage of areas with ground points
-      #     perc_nogrd = 100 * max(0,as.numeric(global(dtm,"notNA")-global(mask_noground,"notNA")))/as.numeric(global(dtm,"notNA"))
-      #     
-      #     # Common settings
-      #     # Default: step is 25 m, sub is 5, bulge is 2 m, spike is 1+1 m, and offset is 0.05 m
-      #     # Nature: step is 5 m, sub is 3, bulge is 1 m, spike is 1+1 m, and offset is 0.05 m
-      #     # extra_fine changes sub to 7, bulge should be 1/10th of step size, but is clamped to between 1 and 2 by default
-      #     
-      #     dtms_custom = data.table(name = c("dtm_lasfine"), arguments_additional = c("-step 10 -bulge 1.0 -hyper_fine"))
-      #     
-      #     for(i in 1:nrow(dtms_custom)){
-      #       name_dtm_custom = dtms_custom[i]$name
-      #       arguments_additional = dtms_custom[i]$arguments_additional
-      #       
-      #       cat("Creating",name_dtm_custom,"\n")
-      #       time_dtm_custom = make.dtm_custom(params_general = params_general, path_output = file.path(params_general$path_data,name_dtm_custom), name_raster = name_dtm_custom, kill = 200, step = resolution, arguments_additional = arguments_additional)
-      #       name_time = paste0("time_",name_dtm_custom)
-      #       summary_full[, (name_time) := time_dtm_custom]
-      #       
-      #       files_dtm_custom = list.files.nonzero(path = file.path(params_general$path_data,name_dtm_custom), pattern = ".tif", full.names = TRUE)
-      #       dtm_custom = vrt(files_dtm_custom); terra::crs(dtm_custom) = crs_scan
-      #       if(ext(pulsedensity) != ext(dtm_custom)){
-      #         cat("Warning! DTM extent is off and will be adjusted!\n")
-      #         dtm_custom = crop(extend(dtm_custom,pulsedensity),pulsedensity)
-      #       }
-      #       writeRaster(dtm_custom, filename = file.path(path_output,paste0(name_dtm_custom,addendum_name,".tif")), overwrite = T)
-      #       cleanup.files(file.path(params_general$path_data,name_dtm_custom)) # added in v.47, because laz files were not deleted before and could create huge demand for temporary file space
-      #     }
-      #     
-      #     # to create an index of dtm uncertainty, we use the difference between dtm_lasfine and dtm_lasdef
-      #     file_dtm_lasfine = file.path(path_output,paste0("dtm_lasfine",addendum_name,".tif"))
-      #     
-      #     perc_undtm = as.numeric(NA)
-      #     
-      #     if(file.exists(file_dtm_lasfine)){
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       cat("\nCreate mask of DTM uncertainty \n")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       
-      #       file_dtm_lasdef = file.path(path_output,paste0("dtm_lasdef",addendum_name,".tif"))
-      #       if(!file.exists(file_dtm_lasdef)){
-      #         file_dtm_lasdef = file.path(path_output,paste0("dtm",addendum_name,".tif"))
-      #       }
-      #       
-      #       dtm_lasdef = rast(file_dtm_lasdef)
-      #       dtm_lasfine = rast(file_dtm_lasfine)
-      #       
-      #       mat_circular = focalMat(dtm_lasdef, 10, type = "circle") # draw a 10 circle around each point
-      #       mat_circular[mat_circular != 0] = 1
-      #       dtm_lasdef_smoothed = focal(dtm_lasdef, w = mat_circular, "mean", na.rm = T)  
-      #       dtm_lasfine_smoothed = focal(dtm_lasfine, w = mat_circular, "mean", na.rm = T)  
-      #       
-      #       diff_dtms = dtm_lasfine_smoothed - dtm_lasdef_smoothed
-      #       
-      #       mask_unstabledtm = ifel(diff_dtms < 2 & diff_dtms > -2,1,NA) 
-      #       writeRaster(mask_unstabledtm, filename = file.path(path_output,paste0("mask_unstabledtm",addendum_name,".tif")), overwrite = T)
-      #       
-      #       perc_undtm = 100 * max(0, as.numeric(global(diff_dtms,"notNA") - global(mask_unstabledtm,"notNA")))/as.numeric(global(diff_dtms,"notNA"))
-      #     }
-      #     
-      #     #%%%%%%%%%%%%%%%%%%%%%%#
-      #     cat("\nDSM creation \n")
-      #     #%%%%%%%%%%%%%%%%%%%%%%#
-      #     
-      #     step_processing = paste0("create DSMs")
-      # 
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     cat("\nCreating highest point-based DSM \n")
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     time_dsm_highest = make.dsm_highest(params_general = params_general, path_output = file.path(params_general$path_data,"dsm_highest"), name_raster = "dsm_highest", type_output = "tif", step = resolution, subcircle = 0.1)
-      #       
-      #     summary_full$time_dsm_highest = time_dsm_highest
-      #       
-      #     files_dsm_highest = list.files.nonzero(path = file.path(params_general$path_data,"dsm_highest"), pattern = ".tif", full.names = TRUE)
-      #     dsm_highest = vrt(files_dsm_highest); terra::crs(dsm_highest) = crs_scan
-      #     if(ext(dsm_highest) != ext(dtm)){
-      #       cat("Warning! DSM extent is off and will be adjusted!\n")
-      #       dsm_highest = crop(extend(dsm_highest,dtm),dtm)
-      #     }
-      #     writeRaster(dsm_highest, filename = file.path(path_output,paste0("dsm_highest",addendum_name,".tif")), overwrite = T)
-      #       
-      #     chm_highest = dsm_highest - dtm; terra::crs(chm_highest) = crs_scan
-      #     chm_highest = clamp(chm_highest, lower = 0, values = T)
-      #     writeRaster(chm_highest, filename = file.path(path_output,paste0("chm_highest",addendum_name,".tif")), overwrite = T)
-      #       
-      #     # calculate some sumstats
-      #     chm_mean = as.numeric(global(chm_highest, "mean",na.rm = T))
-      #     chm_sd = as.numeric(global(chm_highest, "sd",na.rm = T))
-      #     chm_perc99 = as.numeric(global(chm_highest, quantile, probs = 0.99, na.rm = T))
-      #     chm_max = as.numeric(global(chm_highest, "max",na.rm = T))
-      # 
-      #     chm_min2 = ifel(chm_highest >= 2, 1, 0)
-      #     chm_min10 = ifel(chm_highest >= 10, 1, 0)
-      #     cc2 = as.numeric(global(chm_min2, "sum",na.rm = T))/as.numeric(global(chm_min2, "notNA"))
-      #     cc10 = as.numeric(global(chm_min10, "sum",na.rm = T))/as.numeric(global(chm_min10, "notNA"))
-      #     
-      #     # we add a highnoise / cloud mask
-      #     cat("Some CHM values are close to cutoff. These are potentially high noise / clouds that have not been removed\n")
-      #     invmask_cloud = clamp(chm_highest, lower = height_lim - 1, values = F)
-      #     invmask_cloud = clamp(invmask_cloud, upper = 1, lower = 1, values = T)
-      #     invmask_cloud = focal(invmask_cloud, w = 11, fun = "median", na.rm = T)
-      #     mask_cloud = ifel(is.na(invmask_cloud),1,NA)
-      #     writeRaster(mask_cloud, filename = file.path(path_output,paste0("mask_cloud",addendum_name,".tif")), overwrite = T)
-      #     
-      #     # get percentage of cloudy areas
-      #     perc_cloud = 100 * max(0, as.numeric(global(dtm,"notNA") - global(mask_cloud,"notNA")))/as.numeric(global(dtm,"notNA"))
-      #      
-      #     if("tin" %in% types_dsm){
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       cat("\nCreating TIN-based DSM \n")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       time_dsm_tin = las2dem(params_general = params_general, path_output = file.path(params_general$path_data,"dsm_tin"), name_raster = "dsm_tin", kill = 200, step = resolution, type_output = "tif", option = "dsm")
-      #       summary_full$time_dsm_tin = time_dsm_tin
-      # 
-      #       files_dsm_tin = list.files.nonzero(path = file.path(params_general$path_data,"dsm_tin"), pattern = ".tif", full.names = TRUE)
-      #       dsm_tin = vrt(files_dsm_tin); terra::crs(dsm_tin) = crs_scan
-      #       if(ext(dsm_tin) != ext(dtm)){
-      #         cat("Warning! DSM extent is off and will be adjusted!\n")
-      #         dsm_tin = crop(extend(dsm_tin,dtm),dtm)
-      #       }
-      #       
-      #       writeRaster(dsm_tin, filename = file.path(path_output,paste0("dsm_tin",addendum_name,".tif")), overwrite = T)
-      #       
-      #       chm_tin = dsm_tin - dtm; terra::crs(chm_tin) = crs_scan
-      #       chm_tin = clamp(chm_tin, lower = 0, values = T)
-      #       writeRaster(chm_tin, filename = file.path(path_output,paste0("chm_tin",addendum_name,".tif")), overwrite = T)
-      #     }
-      # 
-      #     if("lspikefree" %in% types_dsm & nrow(params_dsmadaptive) > 0){
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       cat("\nCreating locally adaptive spikefree DSM \n")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      # 
-      #       for(id_param in 1:nrow(params_dsmadaptive)){
-      #         params_dsmadaptive_current = params_dsmadaptive[id_param]
-      #         
-      #         # simple name, in case only one parameter configuration is provided
-      #         name_dsm_lspikefree = as.character(NA)
-      #         if(nrow(params_dsmadaptive) == 1){
-      #           name_dsm_lspikefree = "dsm_lspikefree"
-      #         } else {
-      #           name_dsm_lspikefree = paste0("dsm_lspikefree_multi",params_dsmadaptive_current$multi,"_slope",params_dsmadaptive_current$slope,"_offset",params_dsmadaptive_current$offset)
-      #         }
-      #         
-      #         cat("Creating",name_dsm_lspikefree,"\n")
-      #         time_dsm_lspikefree = make.dsm_locallyadaptive(params_general = params_general, path_output = file.path(params_general$path_data,name_dsm_lspikefree), name_raster = name_dsm_lspikefree, kill = 200, step = resolution, option = "spikefree", params_dsmadaptive = params_dsmadaptive_current, normalize = F, perturbation_max = perturbation_max, timeout_lspikefree_max = timeout_lspikefree_max)
-      # 
-      #         name_time = paste0("time_",name_dsm_lspikefree)
-      #         summary_full[, (name_time) := time_dsm_lspikefree]
-      # 
-      #         files_dsm_lspikefree = list.files.nonzero(path = file.path(params_general$path_data,name_dsm_lspikefree), pattern = ".tif", full.names = TRUE)
-      #         dsm_lspikefree = vrt(files_dsm_lspikefree); terra::crs(dsm_lspikefree) = crs_scan
-      #         if(ext(dsm_lspikefree) != ext(dtm)){
-      #           cat("Warning! DSM extent is off and will be adjusted!\n")
-      #           dsm_lspikefree = crop(extend(dsm_lspikefree,dtm),dtm)
-      #         }
-      #         
-      #         writeRaster(dsm_lspikefree, filename = file.path(path_output,paste0(name_dsm_lspikefree,addendum_name,".tif")), overwrite = T)
-      #         
-      #         chm_lspikefree = dsm_lspikefree - dtm; terra::crs(chm_lspikefree) = crs_scan
-      #         chm_lspikefree = clamp(chm_lspikefree, lower = 0, values = T)
-      #         writeRaster(chm_lspikefree, filename = file.path(path_output,paste0(gsub("dsm","chm",name_dsm_lspikefree),"",addendum_name,".tif")), overwrite = T)
-      # 
-      #         if(id_param == 1){
-      #           files_perturbation = list.files.nonzero(path = file.path(params_general$path_data,name_dsm_lspikefree), pattern = "_perturbation.shp", full.names = TRUE)
-      #           if(length(files_perturbation) > 0){
-      #             contours_perturbation = vect(lapply(files_perturbation, vect))
-      #             writeVector(contours_perturbation, filename = file.path(path_output,paste0("contours_perturbation",addendum_name,".shp")), overwrite = T)
-      #           }
-      #         }
-      #       }
-      #     }
-      # 
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     cat("\nCreate normalized point cloud \n")
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     step_processing = paste0("normalize point cloud")
-      #     # NOTE: we do not update params_general, the normalized point clouds are going to be stored in a subfolder, indicated by params_general_normalized$path_data
-      #     params_general$cleanup = F
-      #     params_general_normalized = NULL
-      #     params_general_normalized = normalize.pointcloud(params_general = params_general, path_dtm = "", update.path = T)
-      # 
-      #     laserpenetration_mean = NULL
-      #     
-      #     if(estimate.laserpenetration == T){
-      #       step_processing = paste0("estimate laser penetration")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       cat("\nEstimate laser penetration \n")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       # we estimate the laser's capability of penetrating vegetation
-      #       # we do so by computing all first returns above a certain height threshold in the normalized point cloud (set by ignore.below), which should yield only vegetation returns
-      #       # we then compute the number of first returns above that threshold that are also last returns (i.e., single returns)
-      #       # penetration is 1 - the ratio between the two
-      #       # reasoning: in a relatively open canopy, lots of laser pulses are going to hit the ground, and thus inflate the number of single returns
-      #       
-      #       get.laserpenetration(params_general_normalized, path_output = "", type_output = "tif", step = 25, ignore.below = 2)
-      # 
-      #       files_returns_first = list.files.nonzero(path = file.path(params_general_normalized$path_data,"laserpenetration"), pattern = "_first.tif", full.names = TRUE)
-      #       files_returns_firstlast = list.files.nonzero(path = file.path(params_general_normalized$path_data,"laserpenetration"), pattern = "_firstlast.tif", full.names = TRUE)
-      # 
-      #       # using the virtual raster method from terra package
-      #       returns_first = vrt(files_returns_first)
-      #       terra::crs(returns_first) = crs_scan
-      #       returns_firstlast = vrt(files_returns_firstlast)
-      #       terra::crs(returns_firstlast) = crs_scan
-      # 
-      #       returns_first_sum = as.numeric(global(returns_first,"sum",na.rm = T))
-      #       returns_firstlast_sum = as.numeric(global(returns_firstlast,"sum",na.rm = T))
-      #       laserpenetration_mean = 1.0 - returns_firstlast_sum/returns_first_sum
-      # 
-      #       laserpenetration = ifel(returns_first > 0, 1.0 - returns_firstlast/returns_first, NA)
-      #       writeRaster(laserpenetration, filename = file.path(path_output,paste0("laserpenetration",addendum_name,".tif")), overwrite = T)
-      #     }
-      #     
-      #     step_processing = paste0("create DSMs from normalized point cloud")
-      #     
-      #     if("highest_norm" %in% types_dsm){
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       cat("\nCreating highest point-based CHM \n")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       time_chmn_highest = make.dsm_highest(params_general = params_general_normalized, path_output = file.path(params_general$path_data,"chmn_highest"), name_raster = "chmn_highest", type_output = "tif", step = resolution, subcircle = 0.1)
-      #       
-      #       summary_full$time_chmn_highest = time_chmn_highest
-      #       
-      #       files_chmn_highest = list.files.nonzero(path = file.path(params_general$path_data,"chmn_highest"), pattern = ".tif", full.names = TRUE)
-      #       chmn_highest = vrt(files_chmn_highest); terra::crs(chmn_highest) = crs_scan
-      #       chmn_highest = clamp(chmn_highest, lower = 0, values = T)
-      #       if(ext(chmn_highest) != ext(dtm)){
-      #         cat("Warning! CHM extent is off and will be adjusted!\n")
-      #         chmn_highest = crop(extend(chmn_highest,dtm),dtm)
-      #       }
-      #       writeRaster(chmn_highest, filename = file.path(path_output,paste0("chmn_highest",addendum_name,".tif")), overwrite = T)
-      #     }
-      #     
-      #     if("tin_norm" %in% types_dsm){
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       cat("\nCreating TIN-based CHM \n")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       time_chmn_tin = las2dem(params_general = params_general_normalized, path_output = file.path(params_general$path_data,"chmn_tin"), name_raster = "chmn_tin", kill = 200, step = resolution, type_output = "tif", option = "dsm")
-      #       summary_full$time_chmn_tin = time_chmn_tin
-      #       
-      #       files_chmn_tin = list.files.nonzero(path = file.path(params_general$path_data,"chmn_tin"), pattern = ".tif", full.names = TRUE)
-      #       chmn_tin = vrt(files_chmn_tin); terra::crs(chmn_tin) = crs_scan
-      #       chmn_tin = clamp(chmn_tin, lower = 0, values = T)
-      #       if(ext(chmn_tin) != ext(dtm)){
-      #         cat("Warning! CHM extent is off and will be adjusted!\n")
-      #         chmn_tin = crop(extend(chmn_tin,dtm),dtm)
-      #       }
-      #       writeRaster(chmn_tin, filename = file.path(path_output,paste0("chmn_tin",addendum_name,".tif")), overwrite = T)
-      #     }
-      #     
-      #     if("lspikefree_norm" %in% types_dsm & nrow(params_dsmadaptive) > 0){
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       cat("\nCreating locally adaptive spikefree CHM \n")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       
-      #       for(id_param in 1:nrow(params_dsmadaptive)){
-      #         params_dsmadaptive_current = params_dsmadaptive[id_param]
-      #         
-      #         # simple name, in case only one parameter configuration is provided
-      #         if(nrow(params_dsmadaptive) == 1){
-      #           name_chmn_lspikefree = "chmn_lspikefree"
-      #         } else {
-      #           name_chmn_lspikefree = paste0("chm_lspikefree_multi",params_dsmadaptive_current$multi,"_slope",params_dsmadaptive_current$slope,"_offset",params_dsmadaptive_current$offset)
-      #         }
-      #         
-      #         cat("Creating",name_chmn_lspikefree,"\n")
-      #         time_chmn_lspikefree = make.dsm_locallyadaptive(params_general = params_general_normalized, path_output = file.path(params_general$path_data, name_chmn_lspikefree), name_raster = name_chmn_lspikefree, kill = 200, step = resolution, option = "spikefree", params_dsmadaptive = params_dsmadaptive_current, normalize = F, perturbation_max = perturbation_max, timeout_lspikefree_max = timeout_lspikefree_max)
-      #         
-      #         name_time = paste0("time_",name_chmn_lspikefree)
-      #         summary_full[, (name_time) := time_chmn_lspikefree]
-      #         
-      #         files_chmn_lspikefree = list.files.nonzero(path = file.path(params_general$path_data,name_chmn_lspikefree), pattern = ".tif", full.names = TRUE)
-      #         chmn_lspikefree = vrt(files_chmn_lspikefree); terra::crs(chmn_lspikefree) = crs_scan
-      #         chmn_lspikefree = clamp(chmn_lspikefree, lower = 0, values = T)
-      #         if(ext(chmn_lspikefree) != ext(dtm)){
-      #           cat("Warning! CHM extent is off and will be adjusted!\n")
-      #           chmn_lspikefree = crop(extend(chmn_lspikefree,dtm),dtm)
-      #         }
-      #         writeRaster(chmn_lspikefree, filename = file.path(path_output,paste0(name_chmn_lspikefree,addendum_name,".tif")), overwrite = T)
-      #       }
-      #     }
-      # 
-      #     if(!is.null(resolution_sumstatspc)){
-      #       step_processing = paste0("create point cloud statistics")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       cat("\nCompute canopy summary statistics from point cloud\n")
-      #       #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #       for(resolution_current in resolution_sumstatspc){
-      #         cat("Using resolution: ",resolution_current,"\n")
-      #         dir_sumstats = file.path(params_general$path_data, paste0("sumstats",resolution_current,"_pc"))
-      #         compute.sumstats_pc(params_general = params_general_normalized, path_output = dir_sumstats, resolution = resolution_current, cutoff_height = 0, type_output = "tif")
-      # 
-      #         files_sumstats = data.table(file = list.files(dir_sumstats,pattern = ".tif", full.names = T))
-      #         files_sumstats[, file_basename := gsub(".tif","",basename(file))]
-      #         files_sumstats[, name := substr(file_basename, nchar(file_basename)-2, nchar(file_basename))]
-      # 
-      #         sumstats_pc = rast(files_sumstats$file)
-      #         names(sumstats_pc) = files_sumstats$name
-      # 
-      #         cat("Write sumstats to file\n")
-      #         writeRaster(sumstats_pc, filename = file.path(path_output,paste0("sumstats",resolution_current,"_pc",addendum_name,".tif")), overwrite = T)
-      #       }
-      #     }
-      # 
-      #     if(path_output_laznorm != ""){
-      #       step_processing = paste0("write normalized laz files")
-      #       if(!dir.exists(path_output_laznorm)) dir.create(path_output_laznorm)
-      # 
-      #       files_laznorm = list.files(params_general_normalized$path_data, pattern = ".laz", full.names = T)
-      #       if(length(files_laznorm) > 0){
-      #         #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #         cat("\nSave normalized laz files \n")
-      #         #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #         file.copy(files_laznorm, path_output_laznorm)
-      #       }
-      #     }
-      # 
-      #     time_end_current = Sys.time()
-      # 
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     cat("\nProduce combined mask \n")
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     
-      #     step_processing = paste0("combine masks")
-      #     files_masks = list.files(path_output, pattern = "mask_")      
-      #     files_masks = files_masks[files_masks %like% "mask_pd02" | files_masks %like% "mask_cloud" | files_masks %like% "mask_noground"]
-      #     masks_combined = rast(file.path(path_output,files_masks))
-      #     mask_combined = sum(masks_combined)
-      #     writeRaster(mask_combined, filename = file.path(path_output,paste0("mask_combined",addendum_name,".tif")), overwrite = T)
-      #     
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     cat("\nProduce synthesis \n")
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      # 
-      #     step_processing = paste0("produce synthesis")
-      #     # get dates
-      #     # the global encoding bit is often not set correctly, but common values that indicate adjusted GPS standard time should be 1,5,17 and 21
-      #     # in practice it is easier to just check whether the timestamps fall within the week and sort out the rest manually (i.e., overwrite by setting is.stdtime = T/F)
-      #     # we set a minimum timestamp of -369280000 (01/01/2000), everything below is suspect for a lidar scan
-      #     dates_acquisition = data.table(mindt = as.Date(NA), maxdt = as.Date(NA))
-      #     use.stdtime = F
-      #     if(is.na(is.stdtime)){
-      #       if(!is.na(summary_full$mingps) & !is.na(summary_full$maxgps)){
-      #         if(summary_full$mingps > -369280000 & summary_full$maxgps > -369280000 & summary_full$mingps != 0 & !(summary_full$mingps >= 0 & summary_full$mingps <= 604800 & summary_full$maxgps >= 0 & summary_full$maxgps <= 604800)){
-      #           use.stdtime = T
-      #         }
-      #       }
-      #     } else {
-      #       if(is.stdtime == T){
-      #         use.stdtime = T
-      #       }
-      #     }
-      #     
-      #     if(use.stdtime == T){
-      #       # conversion cf. https://groups.google.com/g/lastools/c/dU8CWeVrhNE
-      #       # JAN6_1980 = 315964800; #Seconds between Jan 1, 1970 (POSIX time zero) and Jan 6, 1980 (GPS time zero)
-      #       GPS_OFFSET = 1e9
-      #       dates_acquisition = data.table(
-      #         mindt = as.Date(as.POSIXct(summary_full$mingps + GPS_OFFSET, origin = "1980-01-06")),
-      #         maxdt = as.Date(as.POSIXct(summary_full$maxgps + GPS_OFFSET, origin = "1980-01-06"))
-      #       )
-      #     } else {
-      #       dates_from_path = get.dates_from_path(path_input)
-      #       if(!is.na(dates_from_path$mindt) & !is.na(dates_from_path$maxdt)){
-      #         dates_acquisition = dates_from_path
-      #       } else {
-      #         dates_acquisition$mindt = as.Date(metadata$acq_mindt,"%d/%m/%Y")
-      #         dates_acquisition$maxdt = as.Date(metadata$acq_maxdt,"%d/%m/%Y")
-      #       }
-      #     }
-      # 
-      #     # create a polygon + metadata
-      #     outline_localCRS$dataset = metadata$dataset
-      #     outline_localCRS$site = metadata$site
-      #     outline_localCRS$source = metadata$source
-      #     outline_localCRS$citation = metadata$citation
-      #     outline_localCRS$contact = metadata$contact
-      #     outline_localCRS$access = metadata$access
-      #     outline_localCRS$license = metadata$license
-      #     outline_localCRS$updated = metadata$updated
-      #     outline_localCRS$id_orig = metadata$id_orig
-      #     outline_localCRS$acq_type = metadata$acq_type
-      #     outline_localCRS$acq_crs = metadata$acq_crs
-      #     outline_localCRS$acq_units = metadata$acq_units
-      #     outline_localCRS$acq_mindt = metadata$acq_mindt
-      #     outline_localCRS$acq_maxdt = metadata$acq_maxdt
-      #     outline_localCRS$acq_system = metadata$acq_system
-      #     outline_localCRS$acq_AGL = metadata$acq_AGL
-      #     outline_localCRS$acq_swath = metadata$acq_swath
-      #     outline_localCRS$acq_wavel = metadata$acq_wavel
-      #     outline_localCRS$acq_fpsize = metadata$acq_fpsize
-      #     outline_localCRS$acq_lasdiv = metadata$acq_lasdiv
-      #     outline_localCRS$notes = metadata$notes
-      #     outline_localCRS$issues = metadata$issues
-      #     outline_localCRS$height_lim = height_lim
-      #     outline_localCRS$angle_lim = ifelse(is.null(angle_lim),as.numeric(NA),angle_lim)
-      #     outline_localCRS$class_rm = class_rm
-      #     outline_localCRS$exclass_rm = exclass_rm
-      #     
-      #     # add additional parameters
-      #     outline_localCRS$prms_lspkf = paste0(params_dsmadaptive, collapse = " ") 
-      #     
-      #     # add computed scan information
-      #     description_crs = terra::crs(crs_scan, describe = T) # simplify crs to name / EPSG code if possible
-      #     outline_localCRS$crs = ifelse(is.na(description_crs$name) | is.na(description_crs$code) | is.na(description_crs$authority), crs_scan, paste0(description_crs$name," (",paste0(description_crs[,c("authority","code")],collapse = ":"),")")) 
-      #     outline_localCRS$lon = xmin(centroids(project(outline_localCRS,"EPSG:4326")))
-      #     outline_localCRS$lat = ymin(centroids(project(outline_localCRS,"EPSG:4326")))
-      #     outline_localCRS$area_km2 = round(expanse(project(outline_localCRS,"EPSG:4326"))/1000000,3)
-      #     outline_localCRS$GPSadjstd = summary_full$encoding_global
-      #     outline_localCRS$mingps = round(summary_full$mingps,3)
-      #     outline_localCRS$maxgps = round(summary_full$maxgps,3)
-      #     outline_localCRS$mindt = as.character(format(dates_acquisition$mindt,"%d/%m/%Y"))
-      #     outline_localCRS$maxdt = as.character(format(dates_acquisition$maxdt,"%d/%m/%Y"))
-      #     outline_localCRS$pd_point = round(summary_full$density_points_mean,3)
-      #     outline_localCRS$pd_pulse = round(summary_full$density_pulses_mean,3)
-      #     outline_localCRS$sdpd_pulse = round(summary_full$density_pulses_sd,3)
-      #     outline_localCRS$frac_grnd = round(summary_full$fraction_ground_mean,3)
-      #     outline_localCRS$angle99th = angle99th
-      #     
-      #     # information from masks
-      #     outline_localCRS$perc_pd02 = round(perc_pd02,2)
-      #     outline_localCRS$perc_pd04 = round(perc_pd04,2)
-      #     outline_localCRS$perc_steep = round(perc_steep,2)
-      #     outline_localCRS$perc_nogrd = round(perc_nogrd,2)
-      #     outline_localCRS$perc_undtm = round(perc_undtm,2)
-      #     outline_localCRS$perc_cloud = round(perc_cloud,2)
-      #     
-      #     # add additional information about the resulting landscape
-      #     outline_localCRS$elev = round(as.numeric(global(dtm,"mean",na.rm = T)))
-      #     outline_localCRS$elev_min = round(as.numeric(global(dtm,"min",na.rm = T)))
-      #     outline_localCRS$elev_max = round(as.numeric(global(dtm,"max",na.rm = T)))
-      #     outline_localCRS$chm_mean = round(chm_mean,2)
-      #     outline_localCRS$chm_sd = round(chm_sd,2)
-      #     outline_localCRS$chm_perc99 = round(chm_perc99,2)
-      #     outline_localCRS$chm_max = round(chm_max,2)
-      #     outline_localCRS$cc2 = round(cc2,2)
-      #     outline_localCRS$cc10 = round(cc10,2)
-      #     
-      #     # add information about the processing
-      #     outline_localCRS$type_os = type_os
-      #     outline_localCRS$type_arch = type_architecture
-      #     outline_localCRS$v_lastools = get.version_lastools(params_general)
-      #     
-      #     # a little bit of path magic
-      #     path_origin = path_input
-      #     if(grepl(pattern = paste0(".",type_file),x = path_input, fixed = TRUE) & file_test("-f",path_input)){ # file test may be overkill here
-      #       path_origin = dirname(path_input)
-      #     }
-      #     wd_processing = getwd()
-      #     setwd(path_origin); path_absolute = getwd(); setwd(wd_processing)
-      #     if(grepl(pattern = paste0(".",type_file),x = path_input, fixed = TRUE) & file_test("-f",path_input)){ # file test may be overkill here
-      #       path_absolute = file.path(path_absolute, basename(path_input))
-      #     }
-      #     outline_localCRS$dir_input = path_absolute
-      #     setwd(path_output); path_absolute = getwd(); setwd(wd_processing)
-      #     outline_localCRS$dir_output = path_absolute
-      #     
-      #     # other information
-      #     outline_localCRS$time_start = as.character(format(time_start_current,"%d/%m/%Y %Hh%M"))
-      #     outline_localCRS$time_end = as.character(format(time_end_current,"%d/%m/%Y %Hh%M"))
-      #     outline_localCRS$mins_total = round(as.numeric(difftime(time_end_current,time_start_current,units = "mins")),2)
-      #     outline_localCRS$mins_grdcl = round(as.numeric(summary_full$time_ground_basic),2)
-      #     outline_localCRS$mins_grdrf = round(as.numeric(summary_full$time_ground_refinement),2)
-      #     outline_localCRS$mins_lspkf = round(ifelse(any(colnames(summary_full) == "time_dsm_lspikefree"),as.numeric(summary_full[,c("time_dsm_lspikefree")]), as.numeric(NA)),2)
-      #     outline_localCRS$type_file = type_file
-      #     outline_localCRS$n_files = n_files
-      #     outline_localCRS$n_cores = params_general$n_cores
-      #     outline_localCRS$adjacents = ifelse(retile == "include.adjacents","included","ignored")
-      #     outline_localCRS$size_MBin = size_MB_input
-      #     
-      #     # calculate size
-      #     files_processed = list.files(path_output, recursive = TRUE, full.names = T)
-      #     size_byte_output = sum(file.info(files_processed)$size)
-      #     size_MB_output = round(size_byte_output/(1024*1024),2)
-      #     outline_localCRS$size_MBout = size_MB_output
-      #     
-      #     # write out the local CRS outline
-      #     writeVector(outline_localCRS, filename = file.path(path_output,paste0("outline_localCRS",addendum_name,".shp")), overwrite = T)
-      # 
-      #     # convert to WGS84
-      #     outline_WGS84 = project(outline_localCRS,"EPSG:4326")
-      #     writeVector(outline_WGS84, filename = file.path(path_output,paste0("outline_WGS84",addendum_name,".shp")), overwrite = T)
-      #     pause.xseconds(5) # pause to not overload system with requests (sometimes folders might be locked through synchronization with Dropbox/OneDrive, etc.)
-      #     fwrite(as.data.table(outline_WGS84), file = file.path(path_output,paste0("summary_processing",addendum_name,".csv")))
-      # 
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     cat("\nWrapping up. Writing _INFO_ files\n")
-      #     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-      #     # since v50, summary files are not written out anymore; instead, we provide _INFO_ files 
-      #     # pause to not overload system with requests (sometimes folders might be locked through synchronization with Dropbox/OneDrive, etc.)
-      #     pause.xseconds(5)
-      #     make.info(path_output = path_output, name_file = "_INFO_.txt",params_general = params_general)
-      #     pause.xseconds(5)
-      #     make.info_products(path_output = path_output, name_file = "_INFO_products.csv")
-      #     pause.xseconds(5)
-      #     make.info_summary_processing(path_output = path_output, name_file = "_INFO_summary_processing.csv")
-      #     
-      #     # fwrite(summary_bytile, file = file.path(path_output,paste0("summary_bytile",addendum_name,".csv")))
-      #     # fwrite(summary_full, file = file.path(path_output,paste0("summary_full",addendum_name,".csv")))
+          # new in v.48
+          # use standard algorithms to create specific dtm styles (wilderness/nature)
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          cat("\nCreating additional DTM layers\n")
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          # new in v.48
+          
+          cat("\nCreating highest DTM layers\n")
+          # also add a layer with the basic ground points
+          make.dtm_highest(params_general = params_general,path_output = "", name_raster = "dtm_highest", type_output = "tif", step = resolution, subcircle = 1, classes = "2 8")
+          path_dtm_highest = file.path(params_general$path_data,"dtm_highest")
+          files_dtm_highest = list.files.nonzero(path = path_dtm_highest, pattern = ".tif", full.names = TRUE)
+          dtm_highest = vrt(files_dtm_highest); terra::crs(dtm_highest) = crs_scan
+          if(ext(pulsedensity) != ext(dtm_highest)){
+            cat("Warning! DTM extent is off and will be adjusted!\n")
+            dtm_highest = crop(extend(dtm_highest,pulsedensity),pulsedensity)
+          }
+
+          writeRaster(dtm_highest, filename = file.path(path_output,paste0("dtm_highest",addendum_name,".tif")), overwrite = T)
+          
+          cat("\nhighest DTM layers OK\n")
+
+          # now create a mask for NA values in the DTM
+          minradius_NA = 15
+          dtm_nona_agg = aggregate(ifel(is.na(dtm_highest),NA,1), fact = 5, fun = "mean", na.rm = T)
+          mat_circular = focalMat(dtm_nona_agg, minradius_NA, type = "circle") # draw a circle around each point
+          mat_circular[mat_circular != 0] = 1
+          dtm_nona_agg = terra::focal(dtm_nona_agg, w = mat_circular, fun = "mean", na.rm = T)
+          mask_ground = terra::focal(ifel(is.na(dtm_nona_agg),1,NA), w = mat_circular, fun = "mean", na.rm = T)
+          mask_noground = ifel(is.na(mask_ground), 1, NA)
+          mask_noground = terra::resample(mask_noground, dtm_highest)
+          writeRaster(mask_noground, filename = file.path(path_output,paste0("mask_noground",addendum_name,".tif")), overwrite = T)
+
+          # get percentage of areas with ground points
+          perc_nogrd = 100 * max(0,as.numeric(global(dtm,"notNA")-global(mask_noground,"notNA")))/as.numeric(global(dtm,"notNA"))
+
+          # Common settings
+          # Default: step is 25 m, sub is 5, bulge is 2 m, spike is 1+1 m, and offset is 0.05 m
+          # Nature: step is 5 m, sub is 3, bulge is 1 m, spike is 1+1 m, and offset is 0.05 m
+          # extra_fine changes sub to 7, bulge should be 1/10th of step size, but is clamped to between 1 and 2 by default
+
+          dtms_custom = data.table(name = c("dtm_lasfine"), arguments_additional = c("-step 10 -bulge 1.0 -hyper_fine"))
+
+          for(i in 1:nrow(dtms_custom)){
+            name_dtm_custom = dtms_custom[i]$name
+            arguments_additional = dtms_custom[i]$arguments_additional
+
+            cat("Creating",name_dtm_custom,"\n")
+            time_dtm_custom = make.dtm_custom(params_general = params_general, path_output = file.path(params_general$path_data,name_dtm_custom), name_raster = name_dtm_custom, kill = 200, step = resolution, arguments_additional = arguments_additional)
+            name_time = paste0("time_",name_dtm_custom)
+            summary_full[, (name_time) := time_dtm_custom]
+
+            files_dtm_custom = list.files.nonzero(path = file.path(params_general$path_data,name_dtm_custom), pattern = ".tif", full.names = TRUE)
+            dtm_custom = vrt(files_dtm_custom); terra::crs(dtm_custom) = crs_scan
+            if(ext(pulsedensity) != ext(dtm_custom)){
+              cat("Warning! DTM extent is off and will be adjusted!\n")
+              dtm_custom = crop(extend(dtm_custom,pulsedensity),pulsedensity)
+            }
+            writeRaster(dtm_custom, filename = file.path(path_output,paste0(name_dtm_custom,addendum_name,".tif")), overwrite = T)
+            cleanup.files(file.path(params_general$path_data,name_dtm_custom)) # added in v.47, because laz files were not deleted before and could create huge demand for temporary file space
+          }
+
+          # to create an index of dtm uncertainty, we use the difference between dtm_lasfine and dtm_lasdef
+          file_dtm_lasfine = file.path(path_output,paste0("dtm_lasfine",addendum_name,".tif"))
+
+          perc_undtm = as.numeric(NA)
+
+          if(file.exists(file_dtm_lasfine)){
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            cat("\nCreate mask of DTM uncertainty \n")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+
+            file_dtm_lasdef = file.path(path_output,paste0("dtm_lasdef",addendum_name,".tif"))
+            if(!file.exists(file_dtm_lasdef)){
+              file_dtm_lasdef = file.path(path_output,paste0("dtm",addendum_name,".tif"))
+            }
+
+            dtm_lasdef = rast(file_dtm_lasdef)
+            dtm_lasfine = rast(file_dtm_lasfine)
+
+            mat_circular = focalMat(dtm_lasdef, 10, type = "circle") # draw a 10 circle around each point
+            mat_circular[mat_circular != 0] = 1
+            dtm_lasdef_smoothed = terra::focal(dtm_lasdef, w = mat_circular, fun = "mean", na.rm = T)
+            dtm_lasfine_smoothed = terra::focal(dtm_lasfine, w = mat_circular, fun = "mean", na.rm = T)
+
+            diff_dtms = dtm_lasfine_smoothed - dtm_lasdef_smoothed
+
+            mask_unstabledtm = ifel(diff_dtms < 2 & diff_dtms > -2,1,NA)
+            writeRaster(mask_unstabledtm, filename = file.path(path_output,paste0("mask_unstabledtm",addendum_name,".tif")), overwrite = T)
+
+            perc_undtm = 100 * max(0, as.numeric(global(diff_dtms,"notNA") - global(mask_unstabledtm,"notNA")))/as.numeric(global(diff_dtms,"notNA"))
+          }
+
+          #%%%%%%%%%%%%%%%%%%%%%%#
+          cat("\nDSM creation \n")
+          #%%%%%%%%%%%%%%%%%%%%%%#
+
+          step_processing = paste0("create DSMs")
+
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          cat("\nCreating highest point-based DSM \n")
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          time_dsm_highest = make.dsm_highest(params_general = params_general, path_output = file.path(params_general$path_data,"dsm_highest"), name_raster = "dsm_highest", type_output = "tif", step = resolution, subcircle = 0.1)
+
+          summary_full$time_dsm_highest = time_dsm_highest
+
+          files_dsm_highest = list.files.nonzero(path = file.path(params_general$path_data,"dsm_highest"), pattern = ".tif", full.names = TRUE)
+          dsm_highest = vrt(files_dsm_highest); terra::crs(dsm_highest) = crs_scan
+          if(ext(dsm_highest) != ext(dtm)){
+            cat("Warning! DSM extent is off and will be adjusted!\n")
+            dsm_highest = crop(extend(dsm_highest,dtm),dtm)
+          }
+          writeRaster(dsm_highest, filename = file.path(path_output,paste0("dsm_highest",addendum_name,".tif")), overwrite = T)
+
+          chm_highest = dsm_highest - dtm; terra::crs(chm_highest) = crs_scan
+          chm_highest = clamp(chm_highest, lower = 0, values = T)
+          writeRaster(chm_highest, filename = file.path(path_output,paste0("chm_highest",addendum_name,".tif")), overwrite = T)
+
+          # calculate some sumstats
+          chm_mean = as.numeric(global(chm_highest, "mean",na.rm = T))
+          chm_sd = as.numeric(global(chm_highest, "sd",na.rm = T))
+          chm_perc99 = as.numeric(global(chm_highest, quantile, probs = 0.99, na.rm = T))
+          chm_max = as.numeric(global(chm_highest, "max",na.rm = T))
+
+          chm_min2 = ifel(chm_highest >= 2, 1, 0)
+          chm_min10 = ifel(chm_highest >= 10, 1, 0)
+          cc2 = as.numeric(global(chm_min2, "sum",na.rm = T))/as.numeric(global(chm_min2, "notNA"))
+          cc10 = as.numeric(global(chm_min10, "sum",na.rm = T))/as.numeric(global(chm_min10, "notNA"))
+
+          # we add a highnoise / cloud mask
+          cat("Some CHM values are close to cutoff. These are potentially high noise / clouds that have not been removed\n")
+          invmask_cloud = clamp(chm_highest, lower = height_lim - 1, values = F)
+          invmask_cloud = clamp(invmask_cloud, upper = 1, lower = 1, values = T)
+          invmask_cloud = terra::focal(invmask_cloud, w = 11, fun = "median", na.rm = T)
+          mask_cloud = ifel(is.na(invmask_cloud),1,NA)
+          writeRaster(mask_cloud, filename = file.path(path_output,paste0("mask_cloud",addendum_name,".tif")), overwrite = T)
+
+          # get percentage of cloudy areas
+          perc_cloud = 100 * max(0, as.numeric(global(dtm,"notNA") - global(mask_cloud,"notNA")))/as.numeric(global(dtm,"notNA"))
+
+          if("tin" %in% types_dsm){
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            cat("\nCreating TIN-based DSM \n")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            time_dsm_tin = las2dem(params_general = params_general, path_output = file.path(params_general$path_data,"dsm_tin"), name_raster = "dsm_tin", kill = 200, step = resolution, type_output = "tif", option = "dsm")
+            summary_full$time_dsm_tin = time_dsm_tin
+
+            files_dsm_tin = list.files.nonzero(path = file.path(params_general$path_data,"dsm_tin"), pattern = ".tif", full.names = TRUE)
+            dsm_tin = vrt(files_dsm_tin); terra::crs(dsm_tin) = crs_scan
+            if(ext(dsm_tin) != ext(dtm)){
+              cat("Warning! DSM extent is off and will be adjusted!\n")
+              dsm_tin = crop(extend(dsm_tin,dtm),dtm)
+            }
+
+            writeRaster(dsm_tin, filename = file.path(path_output,paste0("dsm_tin",addendum_name,".tif")), overwrite = T)
+
+            chm_tin = dsm_tin - dtm; terra::crs(chm_tin) = crs_scan
+            chm_tin = clamp(chm_tin, lower = 0, values = T)
+            writeRaster(chm_tin, filename = file.path(path_output,paste0("chm_tin",addendum_name,".tif")), overwrite = T)
+          }
+
+          if("lspikefree" %in% types_dsm & nrow(params_dsmadaptive) > 0 & !is.voidstring(params_general$path_lastools)){
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            cat("\nCreating locally adaptive spikefree DSM \n")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+
+            for(id_param in 1:nrow(params_dsmadaptive)){
+              params_dsmadaptive_current = params_dsmadaptive[id_param]
+
+              # simple name, in case only one parameter configuration is provided
+              name_dsm_lspikefree = as.character(NA)
+              if(nrow(params_dsmadaptive) == 1){
+                name_dsm_lspikefree = "dsm_lspikefree"
+              } else {
+                name_dsm_lspikefree = paste0("dsm_lspikefree_multi",params_dsmadaptive_current$multi,"_slope",params_dsmadaptive_current$slope,"_offset",params_dsmadaptive_current$offset)
+              }
+
+              cat("Creating",name_dsm_lspikefree,"\n")
+              time_dsm_lspikefree = make.dsm_locallyadaptive(params_general = params_general, path_output = file.path(params_general$path_data,name_dsm_lspikefree), name_raster = name_dsm_lspikefree, kill = 200, step = resolution, option = "spikefree", params_dsmadaptive = params_dsmadaptive_current, normalize = F, perturbation_max = perturbation_max, timeout_lspikefree_max = timeout_lspikefree_max)
+
+              name_time = paste0("time_",name_dsm_lspikefree)
+              summary_full[, (name_time) := time_dsm_lspikefree]
+
+              files_dsm_lspikefree = list.files.nonzero(path = file.path(params_general$path_data,name_dsm_lspikefree), pattern = ".tif", full.names = TRUE)
+              dsm_lspikefree = vrt(files_dsm_lspikefree); terra::crs(dsm_lspikefree) = crs_scan
+              if(ext(dsm_lspikefree) != ext(dtm)){
+                cat("Warning! DSM extent is off and will be adjusted!\n")
+                dsm_lspikefree = crop(extend(dsm_lspikefree,dtm),dtm)
+              }
+
+              writeRaster(dsm_lspikefree, filename = file.path(path_output,paste0(name_dsm_lspikefree,addendum_name,".tif")), overwrite = T)
+
+              chm_lspikefree = dsm_lspikefree - dtm; terra::crs(chm_lspikefree) = crs_scan
+              chm_lspikefree = clamp(chm_lspikefree, lower = 0, values = T)
+              writeRaster(chm_lspikefree, filename = file.path(path_output,paste0(gsub("dsm","chm",name_dsm_lspikefree),"",addendum_name,".tif")), overwrite = T)
+
+              if(id_param == 1){
+                files_perturbation = list.files.nonzero(path = file.path(params_general$path_data,name_dsm_lspikefree), pattern = "_perturbation.shp", full.names = TRUE)
+                if(length(files_perturbation) > 0){
+                  contours_perturbation = vect(lapply(files_perturbation, vect))
+                  writeVector(contours_perturbation, filename = file.path(path_output,paste0("contours_perturbation",addendum_name,".shp")), overwrite = T)
+                }
+              }
+            }
+          }
+
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          cat("\nCreate normalized point cloud \n")
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          step_processing = paste0("normalize point cloud")
+          # NOTE: we do not update params_general, the normalized point clouds are going to be stored in a subfolder, indicated by params_general_normalized$path_data
+          params_general$cleanup = F
+          params_general_normalized = NULL
+          params_general_normalized = normalize.pointcloud(params_general = params_general, path_dtm = "", update.path = T)
+
+          laserpenetration_mean = NULL
+
+          if(estimate.laserpenetration == T){
+            step_processing = paste0("estimate laser penetration")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            cat("\nEstimate laser penetration \n")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            # we estimate the laser's capability of penetrating vegetation
+            # we do so by computing all first returns above a certain height threshold in the normalized point cloud (set by ignore.below), which should yield only vegetation returns
+            # we then compute the number of first returns above that threshold that are also last returns (i.e., single returns)
+            # penetration is 1 - the ratio between the two
+            # reasoning: in a relatively open canopy, lots of laser pulses are going to hit the ground, and thus inflate the number of single returns
+
+            get.laserpenetration(params_general_normalized, path_output = "", type_output = "tif", step = 25, ignore.below = 2)
+
+            files_returns_first = list.files.nonzero(path = file.path(params_general_normalized$path_data,"laserpenetration"), pattern = "_first.tif", full.names = TRUE)
+            files_returns_firstlast = list.files.nonzero(path = file.path(params_general_normalized$path_data,"laserpenetration"), pattern = "_firstlast.tif", full.names = TRUE)
+
+            # using the virtual raster method from terra package
+            returns_first = vrt(files_returns_first)
+            terra::crs(returns_first) = crs_scan
+            returns_firstlast = vrt(files_returns_firstlast)
+            terra::crs(returns_firstlast) = crs_scan
+
+            returns_first_sum = as.numeric(global(returns_first,"sum",na.rm = T))
+            returns_firstlast_sum = as.numeric(global(returns_firstlast,"sum",na.rm = T))
+            laserpenetration_mean = 1.0 - returns_firstlast_sum/returns_first_sum
+
+            laserpenetration = ifel(returns_first > 0, 1.0 - returns_firstlast/returns_first, NA)
+            writeRaster(laserpenetration, filename = file.path(path_output,paste0("laserpenetration",addendum_name,".tif")), overwrite = T)
+          }
+
+          step_processing = paste0("create DSMs from normalized point cloud")
+
+          if("highest_norm" %in% types_dsm){
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            cat("\nCreating highest point-based CHM \n")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            time_chmn_highest = make.dsm_highest(params_general = params_general_normalized, path_output = file.path(params_general$path_data,"chmn_highest"), name_raster = "chmn_highest", type_output = "tif", step = resolution, subcircle = 0.1)
+
+            summary_full$time_chmn_highest = time_chmn_highest
+
+            files_chmn_highest = list.files.nonzero(path = file.path(params_general$path_data,"chmn_highest"), pattern = ".tif", full.names = TRUE)
+            chmn_highest = vrt(files_chmn_highest); terra::crs(chmn_highest) = crs_scan
+            chmn_highest = clamp(chmn_highest, lower = 0, values = T)
+            if(ext(chmn_highest) != ext(dtm)){
+              cat("Warning! CHM extent is off and will be adjusted!\n")
+              chmn_highest = crop(extend(chmn_highest,dtm),dtm)
+            }
+            writeRaster(chmn_highest, filename = file.path(path_output,paste0("chmn_highest",addendum_name,".tif")), overwrite = T)
+          }
+
+          if("tin_norm" %in% types_dsm){
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            cat("\nCreating TIN-based CHM \n")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            time_chmn_tin = las2dem(params_general = params_general_normalized, path_output = file.path(params_general$path_data,"chmn_tin"), name_raster = "chmn_tin", kill = 200, step = resolution, type_output = "tif", option = "dsm")
+            summary_full$time_chmn_tin = time_chmn_tin
+
+            files_chmn_tin = list.files.nonzero(path = file.path(params_general$path_data,"chmn_tin"), pattern = ".tif", full.names = TRUE)
+            chmn_tin = vrt(files_chmn_tin); terra::crs(chmn_tin) = crs_scan
+            chmn_tin = clamp(chmn_tin, lower = 0, values = T)
+            if(ext(chmn_tin) != ext(dtm)){
+              cat("Warning! CHM extent is off and will be adjusted!\n")
+              chmn_tin = crop(extend(chmn_tin,dtm),dtm)
+            }
+            writeRaster(chmn_tin, filename = file.path(path_output,paste0("chmn_tin",addendum_name,".tif")), overwrite = T)
+          }
+
+          if("lspikefree_norm" %in% types_dsm & nrow(params_dsmadaptive) > 0){
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            cat("\nCreating locally adaptive spikefree CHM \n")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+
+            for(id_param in 1:nrow(params_dsmadaptive)){
+              params_dsmadaptive_current = params_dsmadaptive[id_param]
+
+              # simple name, in case only one parameter configuration is provided
+              if(nrow(params_dsmadaptive) == 1){
+                name_chmn_lspikefree = "chmn_lspikefree"
+              } else {
+                name_chmn_lspikefree = paste0("chm_lspikefree_multi",params_dsmadaptive_current$multi,"_slope",params_dsmadaptive_current$slope,"_offset",params_dsmadaptive_current$offset)
+              }
+
+              cat("Creating",name_chmn_lspikefree,"\n")
+              time_chmn_lspikefree = make.dsm_locallyadaptive(params_general = params_general_normalized, path_output = file.path(params_general$path_data, name_chmn_lspikefree), name_raster = name_chmn_lspikefree, kill = 200, step = resolution, option = "spikefree", params_dsmadaptive = params_dsmadaptive_current, normalize = F, perturbation_max = perturbation_max, timeout_lspikefree_max = timeout_lspikefree_max)
+
+              name_time = paste0("time_",name_chmn_lspikefree)
+              summary_full[, (name_time) := time_chmn_lspikefree]
+
+              files_chmn_lspikefree = list.files.nonzero(path = file.path(params_general$path_data,name_chmn_lspikefree), pattern = ".tif", full.names = TRUE)
+              chmn_lspikefree = vrt(files_chmn_lspikefree); terra::crs(chmn_lspikefree) = crs_scan
+              chmn_lspikefree = clamp(chmn_lspikefree, lower = 0, values = T)
+              if(ext(chmn_lspikefree) != ext(dtm)){
+                cat("Warning! CHM extent is off and will be adjusted!\n")
+                chmn_lspikefree = crop(extend(chmn_lspikefree,dtm),dtm)
+              }
+              writeRaster(chmn_lspikefree, filename = file.path(path_output,paste0(name_chmn_lspikefree,addendum_name,".tif")), overwrite = T)
+            }
+          }
+
+          if(!is.null(resolution_sumstatspc)){
+            step_processing = paste0("create point cloud statistics")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            cat("\nCompute canopy summary statistics from point cloud\n")
+            #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+            for(resolution_current in resolution_sumstatspc){
+              cat("Using resolution: ",resolution_current,"\n")
+              dir_sumstats = file.path(params_general$path_data, paste0("sumstats",resolution_current,"_pc"))
+              compute.sumstats_pc(params_general = params_general_normalized, path_output = dir_sumstats, resolution = resolution_current, cutoff_height = 0, type_output = "tif")
+
+              files_sumstats = data.table(file = list.files(dir_sumstats,pattern = ".tif", full.names = T))
+              files_sumstats[, file_basename := gsub(".tif","",basename(file))]
+              files_sumstats[, name := substr(file_basename, nchar(file_basename)-2, nchar(file_basename))]
+
+              sumstats_pc = rast(files_sumstats$file)
+              names(sumstats_pc) = files_sumstats$name
+
+              cat("Write sumstats to file\n")
+              writeRaster(sumstats_pc, filename = file.path(path_output,paste0("sumstats",resolution_current,"_pc",addendum_name,".tif")), overwrite = T)
+            }
+          }
+
+          if(path_output_laznorm != ""){
+            step_processing = paste0("write normalized laz files")
+            if(!dir.exists(path_output_laznorm)) dir.create(path_output_laznorm)
+
+            files_laznorm = list.files(params_general_normalized$path_data, pattern = ".laz", full.names = T)
+            if(length(files_laznorm) > 0){
+              #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+              cat("\nSave normalized laz files \n")
+              #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+              file.copy(files_laznorm, path_output_laznorm)
+            }
+          }
+
+          time_end_current = Sys.time()
+
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          cat("\nProduce combined mask \n")
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+
+          step_processing = paste0("combine masks")
+          files_masks = list.files(path_output, pattern = "mask_")
+          files_masks = files_masks[files_masks %like% "mask_pd02" | files_masks %like% "mask_cloud" | files_masks %like% "mask_noground"]
+          masks_combined = rast(file.path(path_output,files_masks))
+          mask_combined = sum(masks_combined)
+          writeRaster(mask_combined, filename = file.path(path_output,paste0("mask_combined",addendum_name,".tif")), overwrite = T)
+
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          cat("\nProduce synthesis \n")
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+
+          step_processing = paste0("produce synthesis")
+          # get dates
+          # the global encoding bit is often not set correctly, but common values that indicate adjusted GPS standard time should be 1,5,17 and 21
+          # in practice it is easier to just check whether the timestamps fall within the week and sort out the rest manually (i.e., overwrite by setting is.stdtime = T/F)
+          # we set a minimum timestamp of -369280000 (01/01/2000), everything below is suspect for a lidar scan
+          dates_acquisition = data.table(mindt = as.Date(NA), maxdt = as.Date(NA))
+          use.stdtime = F
+          if(is.na(is.stdtime)){
+            if(!is.na(summary_full$mingps) & !is.na(summary_full$maxgps)){
+              if(summary_full$mingps > -369280000 & summary_full$maxgps > -369280000 & summary_full$mingps != 0 & !(summary_full$mingps >= 0 & summary_full$mingps <= 604800 & summary_full$maxgps >= 0 & summary_full$maxgps <= 604800)){
+                use.stdtime = T
+              }
+            }
+          } else {
+            if(is.stdtime == T){
+              use.stdtime = T
+            }
+          }
+
+          if(use.stdtime == T){
+            # conversion cf. https://groups.google.com/g/lastools/c/dU8CWeVrhNE
+            # JAN6_1980 = 315964800; #Seconds between Jan 1, 1970 (POSIX time zero) and Jan 6, 1980 (GPS time zero)
+            GPS_OFFSET = 1e9
+            dates_acquisition = data.table(
+              mindt = as.Date(as.POSIXct(summary_full$mingps + GPS_OFFSET, origin = "1980-01-06")),
+              maxdt = as.Date(as.POSIXct(summary_full$maxgps + GPS_OFFSET, origin = "1980-01-06"))
+            )
+          } else {
+            dates_from_path = get.dates_from_path(path_input)
+            if(!is.na(dates_from_path$mindt) & !is.na(dates_from_path$maxdt)){
+              dates_acquisition = dates_from_path
+            } else {
+              dates_acquisition$mindt = as.Date(metadata$acq_mindt,"%d/%m/%Y")
+              dates_acquisition$maxdt = as.Date(metadata$acq_maxdt,"%d/%m/%Y")
+            }
+          }
+
+          cat("\ncreate a polygon + metadata\n")
+          # create a polygon + metadata
+          outline_localCRS$dataset = metadata$dataset
+          outline_localCRS$site = metadata$site
+          outline_localCRS$source = metadata$source
+          outline_localCRS$citation = metadata$citation
+          outline_localCRS$contact = metadata$contact
+          outline_localCRS$access = metadata$access
+          outline_localCRS$license = metadata$license
+          outline_localCRS$updated = metadata$updated
+          outline_localCRS$id_orig = metadata$id_orig
+          outline_localCRS$acq_type = metadata$acq_type
+          outline_localCRS$acq_crs = metadata$acq_crs
+          outline_localCRS$acq_units = metadata$acq_units
+          outline_localCRS$acq_mindt = metadata$acq_mindt
+          outline_localCRS$acq_maxdt = metadata$acq_maxdt
+          outline_localCRS$acq_system = metadata$acq_system
+          outline_localCRS$acq_AGL = metadata$acq_AGL
+          outline_localCRS$acq_swath = metadata$acq_swath
+          outline_localCRS$acq_wavel = metadata$acq_wavel
+          outline_localCRS$acq_fpsize = metadata$acq_fpsize
+          outline_localCRS$acq_lasdiv = metadata$acq_lasdiv
+          outline_localCRS$notes = metadata$notes
+          outline_localCRS$issues = metadata$issues
+          outline_localCRS$height_lim = height_lim
+          outline_localCRS$angle_lim = ifelse(is.null(angle_lim),as.numeric(NA),angle_lim)
+          outline_localCRS$class_rm = class_rm
+          outline_localCRS$exclass_rm = exclass_rm
+
+          cat("\nadd additional parameters\n")
+          # add additional parameters
+          outline_localCRS$prms_lspkf = paste0(params_dsmadaptive, collapse = " ")
+
+          cat("\nadd computed scan information\n")
+          # add computed scan information
+          #description_crs = terra::crs(crs_scan, describe = T) # simplify crs to name / EPSG code if possible
+          #outline_localCRS$crs = ifelse(is.na(description_crs$name) | is.na(description_crs$code) | is.na(description_crs$authority), crs_scan, paste0(description_crs$name," (",paste0(description_crs[,c("authority","code")],collapse = ":"),")"))
+          #outline_localCRS$lon = xmin(centroids(project(outline_localCRS,"EPSG:4326")))
+          #outline_localCRS$lat = ymin(centroids(project(outline_localCRS,"EPSG:4326")))
+          #outline_localCRS$area_km2 = round(expanse(project(outline_localCRS,"EPSG:4326"))/1000000,3)
+          outline_localCRS$GPSadjstd = summary_full$encoding_global
+          outline_localCRS$mingps = round(summary_full$mingps,3)
+          outline_localCRS$maxgps = round(summary_full$maxgps,3)
+          outline_localCRS$mindt = as.character(format(dates_acquisition$mindt,"%d/%m/%Y"))
+          outline_localCRS$maxdt = as.character(format(dates_acquisition$maxdt,"%d/%m/%Y"))
+          outline_localCRS$pd_point = round(summary_full$density_points_mean,3)
+          outline_localCRS$pd_pulse = round(summary_full$density_pulses_mean,3)
+          outline_localCRS$sdpd_pulse = round(summary_full$density_pulses_sd,3)
+          outline_localCRS$frac_grnd = round(summary_full$fraction_ground_mean,3)
+          outline_localCRS$angle99th = angle99th
+
+          cat("\ninformation from masks\n")
+          # information from masks
+          outline_localCRS$perc_pd02 = round(perc_pd02,2)
+          outline_localCRS$perc_pd04 = round(perc_pd04,2)
+          outline_localCRS$perc_steep = round(perc_steep,2)
+          outline_localCRS$perc_nogrd = round(perc_nogrd,2)
+          outline_localCRS$perc_undtm = round(perc_undtm,2)
+          outline_localCRS$perc_cloud = round(perc_cloud,2)
+
+          cat("\nadd additional information about the resulting landscape\n")
+          # add additional information about the resulting landscape
+          outline_localCRS$elev = round(as.numeric(global(dtm,"mean",na.rm = T)))
+          outline_localCRS$elev_min = round(as.numeric(global(dtm,"min",na.rm = T)))
+          outline_localCRS$elev_max = round(as.numeric(global(dtm,"max",na.rm = T)))
+          outline_localCRS$chm_mean = round(chm_mean,2)
+          outline_localCRS$chm_sd = round(chm_sd,2)
+          outline_localCRS$chm_perc99 = round(chm_perc99,2)
+          outline_localCRS$chm_max = round(chm_max,2)
+          outline_localCRS$cc2 = round(cc2,2)
+          outline_localCRS$cc10 = round(cc10,2)
+
+          cat("\nadd information about the processing\n")
+          # add information about the processing
+          outline_localCRS$type_os = type_os
+          outline_localCRS$type_arch = type_architecture
+          outline_localCRS$v_lastools = get.version_lastools(params_general)
+
+          cat("\na little bit of path magic\n")
+          # a little bit of path magic
+          path_origin = path_input
+          if(grepl(pattern = paste0(".",type_file),x = path_input, fixed = TRUE) & file_test("-f",path_input)){ # file test may be overkill here
+            path_origin = dirname(path_input)
+          }
+          wd_processing = getwd()
+          setwd(path_origin); path_absolute = getwd(); setwd(wd_processing)
+          if(grepl(pattern = paste0(".",type_file),x = path_input, fixed = TRUE) & file_test("-f",path_input)){ # file test may be overkill here
+            path_absolute = file.path(path_absolute, basename(path_input))
+          }
+          outline_localCRS$dir_input = path_absolute
+          setwd(path_output); path_absolute = getwd(); setwd(wd_processing)
+          outline_localCRS$dir_output = path_absolute
+          
+          cat("\nother information\n")
+          # other information
+          outline_localCRS$time_start = as.character(format(time_start_current,"%d/%m/%Y %Hh%M"))
+          outline_localCRS$time_end = as.character(format(time_end_current,"%d/%m/%Y %Hh%M"))
+          outline_localCRS$mins_total = round(as.numeric(difftime(time_end_current,time_start_current,units = "mins")),2)
+          outline_localCRS$mins_grdcl = round(as.numeric(summary_full$time_ground_basic),2)
+          outline_localCRS$mins_grdrf = round(as.numeric(summary_full$time_ground_refinement),2)
+          outline_localCRS$mins_lspkf = round(ifelse(any(colnames(summary_full) == "time_dsm_lspikefree"),as.numeric(summary_full[,c("time_dsm_lspikefree")]), as.numeric(NA)),2)
+          outline_localCRS$type_file = type_file
+          outline_localCRS$n_files = n_files
+          outline_localCRS$n_cores = params_general$n_cores
+          outline_localCRS$adjacents = ifelse(retile == "include.adjacents","included","ignored")
+          outline_localCRS$size_MBin = size_MB_input
+          
+          cat("\ncalculate size\n")
+          # calculate size
+          files_processed = list.files(path_output, recursive = TRUE, full.names = T)
+          size_byte_output = sum(file.info(files_processed)$size)
+          size_MB_output = round(size_byte_output/(1024*1024),2)
+          outline_localCRS$size_MBout = size_MB_output
+          
+          cat("\nwrite out the local CRS outline\n")
+          # write out the local CRS outline
+          writeVector(outline_localCRS, filename = file.path(path_output,paste0("outline_localCRS",addendum_name,".shp")), overwrite = T)
+          
+          cat("\nconvert to WGS84\n")
+          # convert to WGS84
+          outline_WGS84 = project(outline_localCRS,"EPSG:4326")
+          writeVector(outline_WGS84, filename = file.path(path_output,paste0("outline_WGS84",addendum_name,".shp")), overwrite = T)
+          pause.xseconds(5) # pause to not overload system with requests (sometimes folders might be locked through synchronization with Dropbox/OneDrive, etc.)
+          fwrite(as.data.table(outline_WGS84), file = file.path(path_output,paste0("summary_processing",addendum_name,".csv")))
+
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          cat("\nWrapping up. Writing _INFO_ files\n")
+          #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+          # since v50, summary files are not written out anymore; instead, we provide _INFO_ files
+          # pause to not overload system with requests (sometimes folders might be locked through synchronization with Dropbox/OneDrive, etc.)
+          pause.xseconds(5)
+          make.info(path_output = path_output, name_file = "_INFO_.txt",params_general = params_general)
+          pause.xseconds(5)
+          make.info_products(path_output = path_output, name_file = "_INFO_products.csv")
+          pause.xseconds(5)
+          make.info_summary_processing(path_output = path_output, name_file = "_INFO_summary_processing.csv")
+
+          # fwrite(summary_bytile, file = file.path(path_output,paste0("summary_bytile",addendum_name,".csv")))
+          # fwrite(summary_full, file = file.path(path_output,paste0("summary_full",addendum_name,".csv")))
       } else {
           # since v50, summary files are not written out anymore; instead, we provide _INFO_ files
           # pause to not overload system with requests (sometimes folders might be locked through synchronization with Dropbox/OneDrive, etc.)

@@ -1451,10 +1451,10 @@ get.scanangle_abs = function(params_general, path_output = "", type_output = "ti
       terra::writeRaster(scan_angle_raster, file.path(path_output, paste0("scan_angle_", tools::file_path_sans_ext(files_names.input[i]),".tif")), filetype = "GTiff", overwrite = TRUE)
     }
     
-    list_tile_rasters = list.files(path = path_output, pattern = "\\.tif", full.names = TRUE)
-    scan_angle_raster_full = terra::vrt(list_tile_rasters)
+    #list_tile_rasters = list.files(path = path_output, pattern = "\\.tif", full.names = TRUE)
+    #scan_angle_raster_full = terra::vrt(list_tile_rasters)
     
-    terra::writeRaster(scan_angle_raster_full, file.path(path_output, "scan_angle_full.tif"), filetype = "GTiff", overwrite = TRUE)
+    #terra::writeRaster(scan_angle_raster_full, file.path(path_output, "scan_angle_full.tif"), filetype = "GTiff", overwrite = TRUE)
     
     
   }
@@ -1758,13 +1758,6 @@ lasinfo = function(params_general, path_output = ""){
   summary_full = NULL
   if(!is.null(summary_bytile)){
     cat("Computing summary statistics")
-    
-    cat(paste0("nrow(summary_bytile)", nrow(summary_bytile), "\n"))
-    cat(paste0("nrow(summary_bytile$area)", nrow(summary_bytile$area), "\n"))
-    cat(paste0("nrow(summary_bytile$points)", nrow(summary_bytile$points), "\n"))
-    cat(paste0("nrow(summary_bytile$points_ground)", nrow(summary_bytile$points_ground), "\n"))
-    
-    print(summary_bytile)
     
     summary_full = data.table(
       n_files = nrow(summary_bytile),
@@ -2679,26 +2672,30 @@ filter.height = function(params_general, path_output = "", height_lim = 125, upd
     # Limit height
     
     
-    make.dtm_nooverhangs(params_general = params_general, path_output = "", name_raster = "dtm_tmp", kill = 200, step = resolution, type_output = "tif", threshold_drop = 10, classes_ground = "2 8",arguments_additional = "")
+    make.dtm_nooverhangs(params_general = params_general, path_output = "", path_products = file.path(params_general$path_data, "dtm_tmp"), name_raster = "dtm_tmp", kill = 200, step = resolution, type_output = "tif", threshold_drop = 10, classes_ground = "2 8",arguments_additional = "")
     # las2dem(params_general = params_general, path_output = "", name_raster = "dtm_supplied", kill = 200, step = resolution, type_output = "tif", option = "dtm")
     #
-    path_dtm_supplied = file.path(params_general$path_data,"dtm_tmp")
-    files_dtm_supplied = list.files.nonzero(path = path_dtm_supplied, pattern = ".tif", full.names = TRUE)
-    dtm_supplied = vrt(files_dtm_supplied);
     
-    writeRaster(dtm_supplied, filename = file.path(params_general$path_data, "dtm_tmp", paste0("dtm_tmp.tif")), overwrite = T)
+    
+    tri <- triangulate(filter = keep_ground_and_water())
+    extra <- add_extrabytes("int", "HAG", "Height Above Ground")
+    trans <- transform_with(tri, store_in_attribute = "HAG")
+    
+    
+    make_filter = function(x)
+    {
+      class(x) <- "laslibfilter"
+      x
+    }
+    
+    filter_HAG = function(x) { make_filter(paste("HAG <=", x[1]))}
     
     filter_height_pipeline =
 
-      lasR::reader_las() +
-      
-      (dtm_supplied = load_raster(file.path(params_general$path_data, "dtm_tmp", paste0("dtm_tmp.tif")))) +
-      
-      # subtract the DTM from all Z values
-      transform_with(dtm_supplied, "-") +
+      lasR::reader_las() + tri + extra + trans +
 
     # write the point clouds with ground and noise points classified
-    write_las(paste0(path_output, "/*.laz"), filter = keep_z_below(125.0))
+    write_las(paste0(path_output, "/*.laz"), filter = filter_HAG(125.0))
 
     exec(filter_height_pipeline,
          on = params_general$path_data,
@@ -2978,7 +2975,7 @@ las2dem = function(params_general, path_output = "", name_raster = "", kill, ste
   return(time_processing)
 }
 
-make.dtm_nooverhangs = function(params_general, path_output = "", name_raster = "dtm_refined", kill = 200, step = 1, type_output = "tif", classes_ground = "2 8", threshold_drop = 10, arguments_additional = ""){
+make.dtm_nooverhangs = function(params_general, path_output = "", path_products = "", name_raster = "dtm_refined", kill = 200, step = 1, type_output = "tif", classes_ground = "2 8", threshold_drop = 10, arguments_additional = ""){
   
   # start recording time
   time_start = Sys.time()
@@ -3011,6 +3008,10 @@ make.dtm_nooverhangs = function(params_general, path_output = "", name_raster = 
       
       parLapplyLB(cl, tiles_pointcloud, make.dtm_nooverhangs_tile, params_general = params_general, path_output = path_output, kill = kill, step = step, type_output = type_output, classes_ground = classes_ground, threshold_drop = threshold_drop, arguments_additional = arguments_additional)
       
+      files_dtm_supplied = list.files.nonzero(path = path_output, pattern = ".tif", full.names = TRUE)
+      dtm_supplied = vrt(files_dtm_supplied); terra::crs(dtm_supplied) = crs_scan
+      writeRaster(dtm_supplied, filename = file.path(path_products, paste0(name_raster,addendum_name,".tif")), overwrite = T)
+      
     }
     else
     {
@@ -3018,20 +3019,22 @@ make.dtm_nooverhangs = function(params_general, path_output = "", name_raster = 
       tiles_pointcloud = list.files(params_general$path_data, pattern = paste0(".",params_general$type_file), full.names = T)
       files_names.input = list.files(params_general$path_data, pattern = paste0(".",params_general$type_file), full.names = F)
       
-      for(i in 1:length(tiles_pointcloud))
-      {
-        original_dtm_pipeline = reader() +
+      del = triangulate(filter = keep_ground())
+      dtm = rasterize(1.0, del)
+      pipeline = del + dtm
+      
+      original_dtm_pipeline = reader() +
           
-          dtm(res = 1.0, add_class = NULL, ofile = file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")))
-        
-        exec(original_dtm_pipeline,
-             on = tiles_pointcloud[i],
+      del + dtm
+         
+      total_raster = exec(original_dtm_pipeline,
+             on = params_general$path_data,
              ncores = 8,
              with = list(chunk = 250),
-             progress = FALSE)
-      }
+             progress = TRUE)
+        
+      writeRaster(total_raster, filename = file.path(path_products, paste0(name_raster, ".tif")), overwrite = T)
 
-      
       
       #params_general$path_data = path_output
       params_general$type_file = "laz"
@@ -3167,20 +3170,18 @@ make.dtm_highest = function(params_general, path_output = "", name_raster = "dtm
     
     for(i in 1:length(tiles_pointcloud))
     {
+      
       original_dtm_pipeline = reader() +
-        
-        filter_with_grid(step, operator = "max", filter = "") +
-        
-        dtm(res = step, add_class = NULL, ofile = file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")))
+      
+      rasterize(step, "z_max", filter = keep_ground(), ofile = file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")))
       
       exec(original_dtm_pipeline,
            on = tiles_pointcloud[i],
-           ncores = 8,
+           ncores = params_general$n_cores,
            with = list(chunk = 250),
            progress = FALSE)
+    
     }
-    
-    
     
     #params_general$path_data = path_output
     params_general$type_file = "laz"
@@ -4439,8 +4440,8 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
             for(i in 1:length(files.input))
             {
               cat("\nprocessing file..\n")
-              las <- readLAS(files.input[i])
-              crs_scan = las@crs$Name
+              las <- lidR::readLAS(files.input[i])
+              crs_scan = lidR::wkt(las)
               
               vectori = vect(las@data, geom=c("X", "Y"), crs=las@crs, keepgeom=TRUE)
               initial_classification_raster = terra::rasterize(vectori, rast(xmin=as.vector(ext(las))[1], xmax=as.vector(ext(las))[2], ymin=as.vector(ext(las))[3], ymax=as.vector(ext(las))[4], ncols=250, nrows=250), field="Classification", fun=function(x, ...) {u <- unique(x)
@@ -4461,8 +4462,8 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           
           cat("\nClassification files analysis called...\n")
           files_classification = list.files.nonzero(path = file.path(params_general$path_data, "lasgrid"), pattern = ".tif", full.names = TRUE)
-          summary(files_classification)
-          classifications = vrt(files_classification)
+          classifications = terra::vrt(files_classification)
+          terra::crs(classifications) = crs_scan
           
           # update crs based on path, if no crs is available from lidar file
           # assign the same crs to all rasters
@@ -4473,7 +4474,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
               crs_scan = gsub("overwrite.with:","",metadata$acq_crs, fixed = T) # new in v.47: allow an overwrite.with option
               terra::crs(classifications) = crs_scan
             } else {
-              terra::crs(classifications) = crs_scan
+              # terra::crs(classifications) = crs_scan
             }
           }
           
@@ -4484,7 +4485,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           cat("\nGenerate classifications raster called...\n")
           if(length(classifications_unique) > 1){
             # only create output when it is informative
-            writeRaster(classifications, filename = file.path(params_general$path_data, "lasgrid",paste0("classifications_supplied",addendum_name,".tif")), overwrite = T)
+            writeRaster(classifications, filename = file.path(path_output,paste0("classifications_supplied",addendum_name,".tif")), overwrite = T)
           }
           cat("\nGenerate classifications raster done!\n")
           
@@ -4507,13 +4508,9 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
             # (presupposes that at least one ground pixel is visible, but that should be a given)
             status = tryCatch(
               {
-                make.dtm_nooverhangs(params_general = params_general, path_output = "", name_raster = "dtm_supplied", kill = 200, step = resolution, type_output = "tif", threshold_drop = 10, classes_ground = "2 8",arguments_additional = "")
+                make.dtm_nooverhangs(params_general = params_general, path_output = "", path_products = path_output, name_raster = "dtm_supplied", kill = 200, step = resolution, type_output = "tif", threshold_drop = 10, classes_ground = "2 8",arguments_additional = "")
                 # las2dem(params_general = params_general, path_output = "", name_raster = "dtm_supplied", kill = 200, step = resolution, type_output = "tif", option = "dtm")
                 #
-                path_dtm_supplied = file.path(params_general$path_data,"dtm_supplied")
-                files_dtm_supplied = list.files.nonzero(path = path_dtm_supplied, pattern = ".tif", full.names = TRUE)
-                dtm_supplied = vrt(files_dtm_supplied); terra::crs(dtm_supplied) = crs_scan
-                writeRaster(dtm_supplied, filename = file.path(path_output, paste0("dtm_supplied",addendum_name,".tif")), overwrite = T)
               },
               error = function(e){
                return("DTM could not be obtained\n")
@@ -4647,7 +4644,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           # using the virtual raster method from terra package
           pulsedensity = vrt(files_pulsedensity)
           terra::crs(pulsedensity) = crs_scan
-          writeRaster(pulsedensity, filename = file.path(params_general$path_data,"pulsedensity",paste0("pulsedensity",addendum_name,".tif")), overwrite = T)
+          writeRaster(pulsedensity, filename = file.path(path_output,paste0("pulsedensity",addendum_name,".tif")), overwrite = T)
 
           # create a pulse density mask (smooth within a radius of 5m)
           # use median smoothing, so that a single pixel with high pulse density does not unduly influence the smoothed pulse
@@ -4658,8 +4655,8 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           mask_pd04 = clamp(pulsedensity_smoothed, lower = 4, values = F)
           mask_pd04 = clamp(mask_pd04, upper = 1, values = T)
 
-          writeRaster(mask_pd02, filename = file.path(params_general$path_data,"pulsedensity",paste0("mask_pd02",addendum_name,".tif")), overwrite = T)
-          writeRaster(mask_pd04, filename = file.path(params_general$path_data,"pulsedensity",paste0("mask_pd04",addendum_name,".tif")), overwrite = T)
+          writeRaster(mask_pd02, filename = file.path(path_output,paste0("mask_pd02",addendum_name,".tif")), overwrite = T)
+          writeRaster(mask_pd04, filename = file.path(path_output,paste0("mask_pd04",addendum_name,".tif")), overwrite = T)
           
           step_processing = paste0("get pulsedensity_scanangle rasters")
           # pulse density rasters, filtering for scan angles
@@ -4671,7 +4668,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
             pulsedensity_scanangle = vrt(files_pulsedensity_scanangle)
             terra::crs(pulsedensity_scanangle) = crs_scan
             writeRaster(pulsedensity_scanangle, filename = file.path(path_output,paste0("pulsedensity_scanangle",scanangle_abs_current,addendum_name,".tif")), overwrite = T)
-            unlink(x = file.path(params_general$path_data,"pulsedensity",paste0("pulsedensity",scanangle_abs_current)), recursive = T) # not needed for further processing
+            unlink(x = file.path(path_output,paste0("pulsedensity",scanangle_abs_current)), recursive = T) # not needed for further processing
           }
           
           step_processing = paste0("get pulsedensity_lastreturn rasters")
@@ -4681,8 +4678,8 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           # using the virtual raster method from terra package
           pulsedensity_lastreturn = vrt(files_pulsedensity_lastreturn)
           terra::crs(pulsedensity_lastreturn) = crs_scan
-          writeRaster(pulsedensity_lastreturn, filename = file.path(params_general$path_data,"pulsedensity",paste0("pulsedensity_lastreturn",addendum_name,".tif")), overwrite = T)
-          unlink(x = file.path(params_general$path_data,"pulsedensity","pulsedensity_lastreturn"), recursive = T) # not needed for further processing
+          writeRaster(pulsedensity_lastreturn, filename = file.path(path_output,paste0("pulsedensity_lastreturn",addendum_name,".tif")), overwrite = T)
+          unlink(x = file.path(path_output,"pulsedensity_lastreturn"), recursive = T) # not needed for further processing
           
           step_processing = paste0("get scanangle_abs rasters")
           # same for scan angle
@@ -4692,11 +4689,15 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
             {
               get.scanangle_abs(params_general = params_general,path_output = "", step = resolution)
 
-              files_scanangle = list.files.nonzero(path = file.path(params_general$path_data,"scanangle_abs","scanangle_abs"), pattern = ".tif", full.names = TRUE)
-              scanangle = vrt(files_scanangle); terra::crs(scanangle) = crs_scan
-              scanangle = ifel(is.na(scanangle) & !is.na(pulsedensity), 0, scanangle) # scanangles below a certain threshold seem to be returned without angle information by LAStools, so fill those up (theoretically, the pulse density raster does not capture all filled pixels, only last returns, but that should give a pretty good picture anyways)
+              files_scanangle = list.files.nonzero(path = file.path(params_general$path_data,"scanangle_abs"), pattern = "\\.tif", full.names = TRUE)
+              
+              scanangle = vrt(files_scanangle); 
+              terra::crs(scanangle) = crs_scan
+              #scanangle = ifel(is.na(scanangle) & !is.na(pulsedensity), 0, scanangle) # scanangles below a certain threshold seem to be returned without angle information by LAStools, so fill those up (theoretically, the pulse density raster does not capture all filled pixels, only last returns, but that should give a pretty good picture anyways)
+              
               angle99th = round(as.numeric(global(scanangle,quantile,probs = 0.99,na.rm = T)),2)
-              writeRaster(scanangle, filename = file.path(params_general$path_data,"scanangle_abs",paste0("scanangle_abs",addendum_name,".tif")), overwrite = T)
+              
+              writeRaster(scanangle, filename = file.path(path_output,paste0("scanangle_abs",addendum_name,".tif")), overwrite = T)
             }
             , error = function(e){
               return("WARNING! Scan angle could not be obtained\n")
@@ -4727,19 +4728,12 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           # this should be identical to dtm_lasdef in most cases
           # time_dtm_refined = las2dem(params_general = params_general, path_output = "", name_raster = "dtm_refined", kill = 200, step = resolution, type_output = "tif", option = "dtm_refined")
 
-          time_dtm = make.dtm_nooverhangs(params_general = params_general, path_output = "", name_raster = "dtm", kill = 200, step = resolution, type_output = "tif",classes_ground = "2 8",threshold_drop = 10)
+          time_dtm = make.dtm_nooverhangs(params_general = params_general, path_output = "", path_products = path_output, name_raster = "dtm", kill = 200, step = resolution, type_output = "tif",classes_ground = "2 8",threshold_drop = 10)
           summary_full$time_dtm = time_dtm
-
-          path_dtm = file.path(params_general$path_data,"dtm")
+          
+          path_dtm = file.path(path_output,"dtm.tif")
           files_dtm = list.files.nonzero(path = path_dtm, pattern = ".tif", full.names = TRUE)
-          dtm = vrt(files_dtm); terra::crs(dtm) = crs_scan
-
-          if(ext(pulsedensity) != ext(dtm)){
-            cat("Warning! DTM extent is off and will be adjusted!\n")
-            dtm = crop(extend(dtm,pulsedensity),pulsedensity)
-          }
-
-          writeRaster(dtm, filename = file.path(path_output,paste0("dtm",addendum_name,".tif")), overwrite = T)
+          dtm = vrt(files_dtm_lasdef); terra::crs(dtm) = crs_scan
 
           
           cat("\nWrite dtm masks\n")

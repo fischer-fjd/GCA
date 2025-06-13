@@ -2011,7 +2011,7 @@ lasground_new = function(params_general, path_output = "", step = NULL, sub = NU
     opt_output_files(ctg) = paste0(path_output,"/{*}")
     opt_progress(ctg) = FALSE # deactivate rendering of progress
     opt_laz_compression(ctg) = TRUE
-    classify_ground(ctg, csf())
+    classify_ground(ctg, csf(cloth_resolution = ifelse(!is.null(step), step, 1.0)))
   }
 
   if(params_general$cleanup == T) cleanup.files(params_general$path_data)
@@ -2224,7 +2224,7 @@ refine.ground = function(params_general, path_output = "", update.path = TRUE){
     cat("Amending file path and reindexing\n")
     params_general$path_data = path_output
     params_general$type_file = "laz"
-    lasindex(params_general)
+    #lasindex(params_general)
     cat("Amended file path returned\n")
     return(params_general)
   }
@@ -2681,7 +2681,7 @@ filter.height = function(params_general, path_output = "", height_lim = 125, upd
     
     lasindex(params_general)
   } else {
-    # !!! TODO: lidR version
+    cat("filter.height open source called...\n")
     
     # Limit height
     
@@ -2716,6 +2716,8 @@ filter.height = function(params_general, path_output = "", height_lim = 125, upd
          ncores = params_general$n_cores,
          with = list(chunk = params_general$size_tile),
          progress = TRUE)
+    
+    cat("filter.height open source done!\n")
 
   }
 
@@ -2946,12 +2948,12 @@ las2dem = function(params_general, path_output = "", name_raster = "", kill, ste
     if(tolower(option) == "dtm"){
       cat(">> dtm tin\n")
       
-      tri_dtm  <- triangulate(filter = keep_ground())
-      dtm_stage  <- rasterize(1, tri_dtm) # input is a triangulation stage
+      tri_dtm  <- triangulate(filter = keep_ground(), max_edge = kill)
+      dtm_stage  <- rasterize(step, tri_dtm) # input is a triangulation stage
       pipeline <- read + tri_dtm + dtm_stage
       dtm = exec(pipeline,
                  on = params_general$path_data,
-                 ncores = 8,
+                 ncores = params_general$n_cores,
                  with = list(chunk = 250),
                  progress = FALSE)
       terra::writeRaster(dtm[[1]], file.path(path_output, "dtm.tif"), filetype = "GTiff", overwrite = TRUE)
@@ -2959,12 +2961,12 @@ las2dem = function(params_general, path_output = "", name_raster = "", kill, ste
       
     } else if(tolower(option) == "dsm"){
       
-      tri_dsm  <- triangulate(filter = keep_first())
-      dsm_stage  <- rasterize(1, tri_dsm) # input is a triangulation stage
+      tri_dsm  <- triangulate(filter = keep_first(), max_edge = kill)
+      dsm_stage  <- rasterize(step, tri_dsm) # input is a triangulation stage
       pipeline <- read + tri_dsm + dsm_stage
       dsm = exec(pipeline, 
                  on = params_general$path_data,
-                 ncores = 8,
+                 ncores = params_general$n_cores,
                  with = list(chunk = 250),
                  progress = FALSE)
       terra::writeRaster(dsm[[1]], file.path(path_output, "dsm_tin.tif"), filetype = "GTiff", overwrite = TRUE)
@@ -3119,6 +3121,7 @@ make.dtm_nooverhangs_tile = function(tile_pointcloud, params_general, path_outpu
 make.dtm_custom = function(params_general, path_output = "", name_raster, kill = 200, step, arguments_additional = ""){
   time_start = Sys.time()
   
+  cat("\nGenerate make.dtm_custom open source called...\n")
   # define output directory
   if(path_output == ""){
     path_output = file.path(params_general$path_data,"dtm_custom")
@@ -3128,12 +3131,15 @@ make.dtm_custom = function(params_general, path_output = "", name_raster, kill =
   # now we need to reclassify
   cat("\nGround classification\n")
   params_general$cleanup = F
-  params_general = lasground_new(params_general = params_general, path_output = path_output, update.path = T, step = NULL, sub = NULL, arguments_additional = arguments_additional)
+  params_general = lasground_new(params_general = params_general, path_output = path_output, update.path = T, step = 0.5, sub = NULL, arguments_additional = arguments_additional)
   
   params_general$cleanup = T
   las2dem(params_general = params_general, path_output = path_output, name_raster = "dtm", kill = 200, step = step, type_output = "tif", option = "dtm")
   time_end = Sys.time()
   time_processing = difftime(time_end,time_start,units = "mins")
+  
+  cat("\nGenerate make.dtm_custom open source done!\n")
+  
   return(time_processing)
 }
 
@@ -3177,9 +3183,9 @@ make.dtm_highest = function(params_general, path_output = "", name_raster = "dtm
     for(i in 1:length(tiles_pointcloud))
     {
       
-      original_dtm_pipeline = reader() +
+      original_dtm_pipeline = reader(filter = keep_ground()) +
       
-      rasterize(step, "z_max", filter = keep_ground(), ofile = file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")))
+      rasterize(step, "z_max", ofile = file.path(path_output, paste0(tools::file_path_sans_ext(files_names.input[i]),".tif")))
       
       exec(original_dtm_pipeline,
            on = tiles_pointcloud[i],
@@ -4584,7 +4590,7 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
             params_general = lasnoise(params_general = params_general, step = step_noise, isolated = isolated)
           }
           
-          # Buffer removam to be implemented in open source
+          # Buffer removal to be implemented in open source
           if(path_output_lazclean != ""){
             step_processing = paste0("write laz files")
             if(!dir.exists(path_output_lazclean)) dir.create(path_output_lazclean)
@@ -4806,8 +4812,9 @@ process.datasubset = function(path_lastools, path_tmp, path_input, path_output, 
           # Default: step is 25 m, sub is 5, bulge is 2 m, spike is 1+1 m, and offset is 0.05 m
           # Nature: step is 5 m, sub is 3, bulge is 1 m, spike is 1+1 m, and offset is 0.05 m
           # extra_fine changes sub to 7, bulge should be 1/10th of step size, but is clamped to between 1 and 2 by default
-
+          
           dtms_custom = data.table(name = c("dtm_lasfine"), arguments_additional = c("-step 10 -bulge 1.0 -hyper_fine"))
+          
 
           for(i in 1:nrow(dtms_custom)){
             name_dtm_custom = dtms_custom[i]$name
